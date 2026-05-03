@@ -1,6 +1,6 @@
 /**
  * Input Manager
- * Handles mouse, keyboard, touch, and scroll inputs for paddle control and game actions.
+ * Handles mouse, keyboard, touch, and scroll inputs.
  */
 
 export class InputManager {
@@ -9,13 +9,14 @@ export class InputManager {
         this.mouseRaw = { x: 0, y: 0 };
         this.isMouseDown = false;
         this.wasMouseDown = false;
+        this.clicked = false; // Set on mousedown, cleared after read
         this.scrollDelta = 0;
         this.keys = {};
         
-        this.paddleAngle = 0; // radians, positive = open face (topspin), negative = closed (backspin)
+        this.paddleAngle = 0;
         this.paddleAngleTarget = 0;
         
-        this.playerOffset = { x: 0, z: 0 }; // Player positional offset
+        this.playerOffset = { x: 0, z: 0 };
         
         this._callbacks = {};
         this._boundHandlers = {};
@@ -41,10 +42,13 @@ export class InputManager {
             this.updateMouseFromClient(e.clientX, e.clientY);
         };
         
-        // Mouse buttons
+        // Mouse buttons - CRITICAL: set clicked flag so between-frame clicks are captured
         this._boundHandlers.mousedown = (e) => {
             if (this.isTouch) return;
-            if (e.button === 0) this.isMouseDown = true;
+            if (e.button === 0) {
+                this.isMouseDown = true;
+                this.clicked = true; // Event flag - will be read next frame
+            }
         };
         
         this._boundHandlers.mouseup = (e) => {
@@ -116,7 +120,6 @@ export class InputManager {
                 for (let i = 0; i < e.changedTouches.length; i++) {
                     if (e.changedTouches[i].identifier === this.touchId) {
                         const duration = Date.now() - this.touchStartTime;
-                        // Quick tap without much movement = swing
                         if (!this.hasTouchMoved && duration < 250) {
                             this.triggerSwing();
                         }
@@ -164,27 +167,27 @@ export class InputManager {
             if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.playerOffset.x -= moveSpeed;
             if (this.keys['KeyD'] || this.keys['ArrowRight']) this.playerOffset.x += moveSpeed;
             
-            // Clamp player position
             this.playerOffset.x = Math.max(-0.6, Math.min(0.6, this.playerOffset.x));
             this.playerOffset.z = Math.max(-0.2, Math.min(0.4, this.playerOffset.z));
         }
         
-        // Reset dx/dy after read
+        // Reset per-frame values
         this.mouse.dx = 0;
         this.mouse.dy = 0;
         this.scrollDelta = 0;
-        
+        this.clicked = false; // Clear event flag after frame
         this.wasMouseDown = this.isMouseDown;
     }
     
     justClicked() {
-        return this.isMouseDown && !this.wasMouseDown;
+        // clicked flag catches between-frame clicks (e.g. quick trackpad taps)
+        return this.clicked || (this.isMouseDown && !this.wasMouseDown);
     }
     
     triggerSwing() {
-        // Simulate a click for one frame
         this.isMouseDown = true;
         this.wasMouseDown = false;
+        this.clicked = true;
     }
     
     on(event, callback) {

@@ -149,6 +149,13 @@ export class Game {
         const events = this.physics.update(dt);
         this.handlePhysicsEvents(events);
         
+        // Player serve: click to auto-toss then hit
+        if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
+            if (this.input.justClicked()) {
+                this.tossBall();
+            }
+        }
+        
         // Check for player hit during serving/rally
         if ((this.state === GameState.SERVING || this.state === GameState.RALLY) && this.physics.ball.active) {
             if (this.input.justClicked()) {
@@ -161,14 +168,13 @@ export class Game {
             this.checkPaddleContact();
         }
         
-        // Auto-hit fallback: if ball is very close and player didn't click, still hit it
-        // This ensures beginners can always play rallies
+        // GENEROUS auto-hit fallback: if ball is close and player didn't click, still hit it
         const ballState2 = this.physics.getBallState();
         const paddlePos2 = this.paddle.getHitPosition();
         const dist2 = paddlePos2.distanceTo(ballState2.position);
-        if (ballState2.active && dist2 < 0.28 && ballState2.lastHitBy !== 'player' && 
-            this.paddle.swingState === 'ready' && ballState2.position.z > 0.3 && ballState2.position.z < 1.4) {
-            // Auto-hit with slightly reduced quality but guaranteed contact
+        const inAutoHitZone = ballState2.active && dist2 < 0.50 && ballState2.lastHitBy !== 'player' && 
+            this.paddle.swingState === 'ready' && ballState2.position.z > 0.1;
+        if (inAutoHitZone) {
             this.paddle.triggerSwing();
         }
         
@@ -194,6 +200,24 @@ export class Game {
         const paddlePos = this.paddle.getHitPosition();
         const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
         const canHitBall = distToBall < 0.60 && ballState.lastHitBy !== 'player';
+        
+        // Show CLICK prompt when ball is very close
+        const clickPrompt = document.getElementById('click-prompt');
+        if (clickPrompt) {
+            if (canHitBall && distToBall < 0.45) {
+                clickPrompt.style.opacity = '1';
+                clickPrompt.style.transform = 'translate(-50%, -50%) scale(1)';
+            } else {
+                clickPrompt.style.opacity = '0';
+                clickPrompt.style.transform = 'translate(-50%, -50%) scale(0.8)';
+            }
+        }
+        
+        // Debug info
+        const debugInfo = document.getElementById('debug-info');
+        if (debugInfo) {
+            debugInfo.textContent = `dist: ${distToBall.toFixed(2)}m | state: ${this.paddle.swingState} | ballZ: ${ballState.position.z.toFixed(2)} | clicked: ${this.input.justClicked()}`;
+        }
         
         // Update paddle position
         this.paddle.update(this.input, dt, ballState.position, ballState.active, canHitBall);

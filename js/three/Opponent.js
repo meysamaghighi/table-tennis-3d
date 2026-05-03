@@ -59,7 +59,7 @@ export class Opponent {
         this.velocity = new THREE.Vector3();
         
         // Difficulty: 0 = easy, 1 = hard
-        this.difficulty = 0.5;
+        this.difficulty = 0.35; // Easier opponent for better rallies
         
         // Swing state
         this.swingState = 'ready';
@@ -204,9 +204,9 @@ export class Opponent {
         
         this.targetX = target.x;
         
-        // Calculate required velocity
+        // Calculate required velocity - slower shots for easier play
         const dist = Math.sqrt(target.x * target.x + (target.z - landing.z) ** 2);
-        this.shotPower = 3.0 + difficulty * 3.0 + dist * 1.5;
+        this.shotPower = 2.2 + difficulty * 2.0 + dist * 1.0;
         
         // Spin based on shot type
         const shotType = Math.random();
@@ -272,7 +272,7 @@ export class Opponent {
             (ballPos.z - paddlePos.z) ** 2
         );
         
-        return dist < 0.15 && ballPos.z < -0.1 && ballPos.z > -0.8;
+        return dist < 0.25 && ballPos.z < 0.1 && ballPos.z > -1.2;
     }
     
     getHitData() {
