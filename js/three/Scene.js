@@ -144,36 +144,26 @@ export class SceneManager {
     }
     
     updateCameraPosition(playerOffset, paddlePosition, ballPosition) {
-        // Smooth third-person camera that follows the action
-        // Camera is positioned behind the player side, looking down the table
-        
+        // Smooth third-person broadcast camera
         const targetCamX = playerOffset.x * 0.3;
-        const targetCamY = 2.6 + Math.abs(playerOffset.z) * 0.1;
-        const targetCamZ = 3.4 + playerOffset.z * 0.2;
+        const targetCamY = 2.7 + Math.abs(playerOffset.z) * 0.1;
+        const targetCamZ = 3.5 + playerOffset.z * 0.2;
         
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.06;
         this.camera.position.y += (targetCamY - this.camera.position.y) * 0.06;
         this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.06;
         
-        // Look at a point that follows the ball slightly for dynamic feel
+        // Look at table center, with slight tracking toward ball
         let lookX = 0;
-        let lookZ = -0.3;
+        let lookZ = 0;
         
         if (ballPosition && ballPosition.lengthSq() > 0) {
-            lookX = ballPosition.x * 0.25;
-            lookZ = ballPosition.z * 0.15;
+            lookX = ballPosition.x * 0.2;
+            lookZ = ballPosition.z * 0.1;
         }
         
-        const lookTarget = new THREE.Vector3(lookX, 0.55, lookZ);
-        
-        // Smooth lookAt
-        const currentLook = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-        const targetLook = lookTarget.clone().sub(this.camera.position).normalize();
-        const blendedLook = currentLook.lerp(targetLook, 0.08);
-        
-        const m = new THREE.Matrix4();
-        m.lookAt(this.camera.position, this.camera.position.clone().add(blendedLook), new THREE.Vector3(0, 1, 0));
-        this.camera.quaternion.setFromRotationMatrix(m);
+        const lookTarget = new THREE.Vector3(lookX, 0.6, lookZ);
+        this.camera.lookAt(lookTarget);
     }
     
     onResize() {
