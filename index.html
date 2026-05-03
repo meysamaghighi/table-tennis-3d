@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Table Tennis 3D</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="loader-content">
+            <div class="loader-spinner"></div>
+            <h2>Loading Pro Table Tennis 3D</h2>
+            <p>Initializing physics engine...</p>
+        </div>
+    </div>
+
+    <div id="main-menu" class="screen active">
+        <div class="menu-bg"></div>
+        <div class="menu-content">
+            <h1 class="game-title">PRO TABLE TENNIS <span class="highlight">3D</span></h1>
+            <p class="subtitle">First-Person Championship</p>
+            <div class="menu-buttons">
+                <button id="btn-quick-match" class="btn btn-primary">Quick Match</button>
+                <button id="btn-equipment" class="btn btn-secondary">Equipment Setup</button>
+                <button id="btn-tutorial" class="btn btn-secondary">How to Play</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="equipment-screen" class="screen">
+        <div class="screen-header">
+            <h2>Equipment Setup</h2>
+            <button id="btn-back-from-equip" class="btn btn-small">Back</button>
+        </div>
+        <div class="equipment-layout">
+            <div class="equipment-panel">
+                <h3>Choose Blade</h3>
+                <div id="blade-list" class="item-list"></div>
+                <div id="blade-stats" class="stats-panel"></div>
+            </div>
+            <div class="equipment-panel">
+                <h3>Choose Rubber (Forehand)</h3>
+                <div id="rubber-fh-list" class="item-list"></div>
+                <div id="rubber-fh-stats" class="stats-panel"></div>
+            </div>
+            <div class="equipment-panel">
+                <h3>Choose Rubber (Backhand)</h3>
+                <div id="rubber-bh-list" class="item-list"></div>
+                <div id="rubber-bh-stats" class="stats-panel"></div>
+            </div>
+        </div>
+        <div class="equipment-preview">
+            <div id="paddle-preview"></div>
+            <div class="selected-summary">
+                <h4>Current Setup</h4>
+                <p id="setup-summary">All-Wood Classic + Mark V (FH) + Mark V (BH)</p>
+                <div class="setup-rating">
+                    <div class="rating-bar"><span>Speed</span><div class="bar"><div id="rating-speed"></div></div></div>
+                    <div class="rating-bar"><span>Spin</span><div class="bar"><div id="rating-spin"></div></div></div>
+                    <div class="rating-bar"><span>Control</span><div class="bar"><div id="rating-control"></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tutorial-screen" class="screen">
+        <div class="screen-header">
+            <h2>How to Play</h2>
+            <button id="btn-back-from-tut" class="btn btn-small">Back</button>
+        </div>
+        <div class="tutorial-content">
+            <div class="tutorial-section">
+                <h3>Controls</h3>
+                <div class="key-grid">
+                    <div class="key-item"><kbd>Mouse</kbd><span>Move paddle</span></div>
+                    <div class="key-item"><kbd>L-Click</kbd><span>Swing / Hit ball</span></div>
+                    <div class="key-item"><kbd>Scroll</kbd><span>Adjust paddle angle</span></div>
+                    <div class="key-item"><kbd>W / S</kbd><span>Move closer / back</span></div>
+                    <div class="key-item"><kbd>A / D</kbd><span>Move left / right</span></div>
+                    <div class="key-item"><kbd>Space</kbd><span>Toss ball (serve)</span></div>
+                    <div class="key-item"><kbd>R</kbd><span>Reset ball</span></div>
+                    <div class="key-item"><kbd>P</kbd><span>Pause</span></div>
+                </div>
+            </div>
+            <div class="tutorial-section">
+                <h3>Equipment Types</h3>
+                <div class="equipment-info">
+                    <div class="info-card">
+                        <h4>Inverted Rubber</h4>
+                        <p>Maximum spin potential. The ball grips the surface for heavy topspin and serves. Best for attackers.</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Anti-Spin</h4>
+                        <p>Reverses incoming spin. The opponent's topspin becomes backspin. Excellent for blocking and control.</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Long Pimples</h4>
+                        <p>Highly disruptive. Opponent's spin is returned unpredictably. Low speed, tricky to play against.</p>
+                    </div>
+                    <div class="info-card">
+                        <h4>Short Pimples</h4>
+                        <p>Flat, fast hits with low spin. The ball skids off the rubber. Great for aggressive close-to-table play.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="tutorial-section">
+                <h3>Tips</h3>
+                <ul>
+                    <li>Time your swing as the ball approaches for clean contact</li>
+                    <li>Angle the paddle up for topspin, down for backspin</li>
+                    <li>Different rubbers react completely differently to spin</li>
+                    <li>Carbon blades are fast but harder to control</li>
+                    <li>Watch the ball's rotation to read incoming spin</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-ui" class="screen">
+        <div id="hud">
+            <div class="score-board">
+                <div class="player-score">
+                    <span class="name">You</span>
+                    <span id="score-player" class="score">0</span>
+                </div>
+                <div class="score-divider">-</div>
+                <div class="opponent-score">
+                    <span id="score-opponent" class="score">0</span>
+                    <span class="name">CPU</span>
+                </div>
+            </div>
+            <div id="serve-indicator">Your Serve</div>
+            <div id="rally-info">
+                <span id="shot-type"></span>
+                <span id="spin-indicator"></span>
+            </div>
+            <div id="message-area"></div>
+        </div>
+        <div id="crosshair"></div>
+        <div id="power-meter">
+            <div class="meter-label">Power</div>
+            <div class="meter-bar"><div id="power-fill"></div></div>
+        </div>
+        <div id="spin-meter">
+            <div class="meter-label">Spin</div>
+            <div class="meter-bar"><div id="spin-fill"></div></div>
+        </div>
+        
+        <!-- Mobile Controls -->
+        <div id="mobile-controls">
+            <button id="btn-mobile-toss" class="mobile-btn">TOSS</button>
+            <button id="btn-mobile-swing" class="mobile-btn mobile-btn-large">SWING</button>
+            <div class="mobile-angle-controls">
+                <button id="btn-angle-up" class="mobile-btn mobile-btn-small">▲</button>
+                <button id="btn-angle-down" class="mobile-btn mobile-btn-small">▼</button>
+            </div>
+            <button id="btn-mobile-pause" class="mobile-btn mobile-btn-small">⏸</button>
+        </div>
+    </div>
+
+    <div id="pause-menu" class="overlay">
+        <div class="overlay-content">
+            <h2>Paused</h2>
+            <button id="btn-resume" class="btn btn-primary">Resume</button>
+            <button id="btn-restart" class="btn btn-secondary">Restart Match</button>
+            <button id="btn-quit" class="btn btn-secondary">Main Menu</button>
+        </div>
+    </div>
+
+    <div id="game-over" class="overlay">
+        <div class="overlay-content">
+            <h2 id="game-result">Match Over</h2>
+            <p id="final-score">11 - 9</p>
+            <button id="btn-play-again" class="btn btn-primary">Play Again</button>
+            <button id="btn-menu" class="btn btn-secondary">Main Menu</button>
+        </div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
