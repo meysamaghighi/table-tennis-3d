@@ -1,6 +1,6 @@
 /**
  * Input Manager
- * Handles mouse, keyboard, touch, and scroll inputs.
+ * Handles mouse, keyboard, touch inputs. NO pointer lock (it breaks mouse tracking).
  */
 
 export class InputManager {
@@ -9,7 +9,7 @@ export class InputManager {
         this.mouseRaw = { x: 0, y: 0 };
         this.isMouseDown = false;
         this.wasMouseDown = false;
-        this.clicked = false; // Set on mousedown, cleared after read
+        this.clicked = false;
         this.scrollDelta = 0;
         this.keys = {};
         
@@ -28,26 +28,40 @@ export class InputManager {
         this.touchStartTime = 0;
         this.hasTouchMoved = false;
         
+        // Track mouse with movement accumulation (works even with pointer lock quirks)
+        this.virtualMouseX = 0;
+        this.virtualMouseY = 0;
+        this.mouseSensitivity = 0.003;
+        
         this.setupListeners();
     }
     
     setupListeners() {
-        // Mouse move
+        // Mouse move - use BOTH client coordinates AND movement accumulation
         this._boundHandlers.mousemove = (e) => {
             if (this.isTouch) return;
+            
+            // Always accumulate movement for virtual position
+            this.virtualMouseX += e.movementX * this.mouseSensitivity;
+            this.virtualMouseY -= e.movementY * this.mouseSensitivity;
+            this.virtualMouseX = Math.max(-1, Math.min(1, this.virtualMouseX));
+            this.virtualMouseY = Math.max(-1, Math.min(1, this.virtualMouseY));
+            
+            // Also track absolute position as fallback
             this.mouseRaw.x = e.clientX;
             this.mouseRaw.y = e.clientY;
             this.mouse.dx = e.movementX || 0;
             this.mouse.dy = e.movementY || 0;
+            
             this.updateMouseFromClient(e.clientX, e.clientY);
         };
         
-        // Mouse buttons - CRITICAL: set clicked flag so between-frame clicks are captured
+        // Mouse buttons
         this._boundHandlers.mousedown = (e) => {
             if (this.isTouch) return;
             if (e.button === 0) {
                 this.isMouseDown = true;
-                this.clicked = true; // Event flag - will be read next frame
+                this.clicked = true;
             }
         };
         
@@ -77,12 +91,7 @@ export class InputManager {
             this.emit('keyup', e.code);
         };
         
-        // Pointer lock change
-        this._boundHandlers.pointerlockchange = () => {
-            this.emit('pointerlockchange', document.pointerLockElement !== null);
-        };
-        
-        // Touch events for mobile - on canvas only
+        // Touch events for mobile
         const canvas = document.getElementById('game-canvas');
         if (canvas) {
             this._boundHandlers.touchstart = (e) => {
@@ -106,9 +115,7 @@ export class InputManager {
                     if (t.identifier === this.touchId) {
                         const dx = Math.abs(t.clientX - this.touchStartX);
                         const dy = Math.abs(t.clientY - this.touchStartY);
-                        if (dx > 10 || dy > 10) {
-                            this.hasTouchMoved = true;
-                        }
+                        if (dx > 10 || dy > 10) this.hasTouchMoved = true;
                         this.updateMouseFromClient(t.clientX, t.clientY);
                         break;
                     }
@@ -145,7 +152,6 @@ export class InputManager {
         window.addEventListener('wheel', this._boundHandlers.wheel, { passive: false });
         window.addEventListener('keydown', this._boundHandlers.keydown);
         window.addEventListener('keyup', this._boundHandlers.keyup);
-        document.addEventListener('pointerlockchange', this._boundHandlers.pointerlockchange);
     }
     
     updateMouseFromClient(clientX, clientY) {
@@ -159,7 +165,7 @@ export class InputManager {
         // Smooth paddle angle
         this.paddleAngle += (this.paddleAngleTarget - this.paddleAngle) * 8 * dt;
         
-        // Player movement (WASD) - desktop only
+        // Player movement (WASD)
         if (!this.isTouch) {
             const moveSpeed = 2.0 * dt;
             if (this.keys['KeyW'] || this.keys['ArrowUp']) this.playerOffset.z -= moveSpeed;
@@ -171,16 +177,14 @@ export class InputManager {
             this.playerOffset.z = Math.max(-0.2, Math.min(0.4, this.playerOffset.z));
         }
         
-        // Reset per-frame values
         this.mouse.dx = 0;
         this.mouse.dy = 0;
         this.scrollDelta = 0;
-        this.clicked = false; // Clear event flag after frame
+        this.clicked = false;
         this.wasMouseDown = this.isMouseDown;
     }
     
     justClicked() {
-        // clicked flag catches between-frame clicks (e.g. quick trackpad taps)
         return this.clicked || (this.isMouseDown && !this.wasMouseDown);
     }
     
@@ -201,23 +205,6 @@ export class InputManager {
         }
     }
     
-    lockPointer(element) {
-        if (this.isTouch) return;
-        if (element && element.requestPointerLock) {
-            element.requestPointerLock();
-        }
-    }
-    
-    unlockPointer() {
-        if (document.exitPointerLock) {
-            document.exitPointerLock();
-        }
-    }
-    
-    isPointerLocked() {
-        return document.pointerLockElement !== null;
-    }
-    
     dispose() {
         window.removeEventListener('mousemove', this._boundHandlers.mousemove);
         window.removeEventListener('mousedown', this._boundHandlers.mousedown);
@@ -225,7 +212,6 @@ export class InputManager {
         window.removeEventListener('wheel', this._boundHandlers.wheel);
         window.removeEventListener('keydown', this._boundHandlers.keydown);
         window.removeEventListener('keyup', this._boundHandlers.keyup);
-        document.removeEventListener('pointerlockchange', this._boundHandlers.pointerlockchange);
         
         const canvas = document.getElementById('game-canvas');
         if (canvas) {

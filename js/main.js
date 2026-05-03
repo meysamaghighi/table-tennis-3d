@@ -137,21 +137,8 @@ class App {
     }
     
     setupPointerLock() {
-        // Click on game canvas to lock pointer (desktop only)
-        this.canvas.addEventListener('click', () => {
-            if (this.game.state === 'rally' ||
-                this.game.state === 'serving') {
-                this.input.lockPointer(this.canvas);
-            }
-        });
-        
-        // Handle ESC to pause
-        this.input.on('pointerlockchange', (locked) => {
-            if (!locked && (this.game.state === 'rally' ||
-                this.game.state === 'serving')) {
-                this.game.setState('paused');
-            }
-        });
+        // POINTER LOCK DISABLED - it breaks mouse tracking on macOS
+        // Mouse uses movement accumulation instead
     }
     
     loop(time) {

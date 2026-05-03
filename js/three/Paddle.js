@@ -13,28 +13,19 @@ export class PaddleMesh {
         const handleThickness = 0.028;
         
         // --- Rounded blade using Shape + ExtrudeGeometry ---
-        const bladeW = 0.075;  // half-width
-        const bladeH = 0.08;   // half-height
+        const bladeW = 0.075;
+        const bladeH = 0.08;
         const cornerR = 0.025;
         
         const bladeShape = new THREE.Shape();
-        // Start at bottom center
         bladeShape.moveTo(0, -bladeH + cornerR);
-        // Bottom left corner
         bladeShape.quadraticCurveTo(-bladeW, -bladeH, -bladeW + cornerR, -bladeH);
-        // Left side
         bladeShape.lineTo(bladeW - cornerR, -bladeH);
-        // Bottom right corner
         bladeShape.quadraticCurveTo(bladeW, -bladeH, bladeW, -bladeH + cornerR);
-        // Right side up
         bladeShape.lineTo(bladeW, bladeH - cornerR);
-        // Top right corner
         bladeShape.quadraticCurveTo(bladeW, bladeH, bladeW - cornerR, bladeH);
-        // Top side
         bladeShape.lineTo(-bladeW + cornerR, bladeH);
-        // Top left corner
         bladeShape.quadraticCurveTo(-bladeW, bladeH, -bladeW, bladeH - cornerR);
-        // Close
         bladeShape.lineTo(-bladeW, -bladeH + cornerR);
         
         const bladeThickness = 0.006;
@@ -47,7 +38,6 @@ export class PaddleMesh {
         };
         
         const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, extrudeSettings);
-        // Center the extrusion
         bladeGeo.translate(0, handleH / 2 + bladeH * 0.3, -bladeThickness / 2);
         
         const bladeMat = new THREE.MeshStandardMaterial({
@@ -103,7 +93,7 @@ export class PaddleMesh {
         this.rubberBack = new THREE.Mesh(rubberBackGeo, this.rubberMat.clone());
         this.group.add(this.rubberBack);
         
-        // Edge tape (thin ring around blade)
+        // Edge tape
         const tapeShape = new THREE.Shape();
         const tw = bladeW + 0.003;
         const th = bladeH + 0.003;
@@ -176,13 +166,18 @@ export class PaddleMesh {
         const reachY = 0.5;
         const baseZ = 0.92 + input.playerOffset.z * 0.2;
         
-        // Auto-track ball
-        let targetX = input.mouse.x * reachX + input.playerOffset.x;
-        let targetY = 0.82 + input.mouse.y * reachY;
+        // USE VIRTUAL MOUSE (movement accumulation) - works even when pointer is locked/hidden
+        // Fall back to regular mouse.x if virtual hasn't been used
+        const mouseX = input.virtualMouseX !== 0 ? input.virtualMouseX : input.mouse.x;
+        const mouseY = input.virtualMouseY !== 0 ? input.virtualMouseY : input.mouse.y;
         
+        let targetX = mouseX * reachX + input.playerOffset.x;
+        let targetY = 0.82 + mouseY * reachY;
+        
+        // Light auto-track (15%) so player still feels control
         if (ballActive && ballPosition.z > 0 && ballPosition.z < 1.8) {
-            targetX = targetX * 0.6 + ballPosition.x * 0.4;
-            targetY = targetY * 0.65 + ballPosition.y * 0.35;
+            targetX = targetX * 0.85 + ballPosition.x * 0.15;
+            targetY = targetY * 0.85 + ballPosition.y * 0.15;
         }
         
         this.basePosition.set(
@@ -220,7 +215,7 @@ export class PaddleMesh {
         this.group.position.z += swingOffsetZ;
         this.group.rotation.set(
             swingRotX + paddleAngle * 0.5,
-            -input.mouse.x * 0.35,
+            -mouseX * 0.35,
             0 - paddleAngle
         );
         

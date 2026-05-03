@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<body style="background:#222; color:#fff; font-family:monospace; padding:40px;">
+<h2>Input Test</h2>
+<p>Move mouse and click anywhere on this page. Check if values change.</p>
+<div id="out" style="font-size:20px; line-height:1.8;"></div>
+<script>
+const out = document.getElementById('out');
+let vals = {cx:0,cy:0,mx:0,my:0,down:false};
+document.addEventListener('mousemove', e => {
+  vals.cx = e.clientX;
+  vals.cy = e.clientY;
+  vals.mx = e.movementX;
+  vals.my = e.movementY;
+});
+document.addEventListener('mousedown', e => { vals.down = true; });
+document.addEventListener('mouseup', e => { vals.down = false; });
+setInterval(() => {
+  out.innerHTML = `clientX: ${vals.cx.toString().padStart(4)} | clientY: ${vals.cy.toString().padStart(4)}<br>
+                   movementX: ${vals.mx.toString().padStart(4)} | movementY: ${vals.my.toString().padStart(4)}<br>
+                   mouseDown: ${vals.down}`;
+  vals.mx = 0; vals.my = 0;
+}, 50);
+</script>
+</body>
+</html>
