@@ -42,7 +42,6 @@ export class UIManager {
             this.hideScreen('menu');
             this.showScreen('game');
             this.game.startMatch();
-            this.game.input.lockPointer(document.body);
         });
         
         document.getElementById('btn-equipment').addEventListener('click', () => {
@@ -70,34 +69,29 @@ export class UIManager {
         document.getElementById('btn-resume').addEventListener('click', () => {
             this.hideOverlay('pause');
             this.game.resume();
-            this.game.input.lockPointer(document.body);
         });
         
         document.getElementById('btn-restart').addEventListener('click', () => {
             this.hideOverlay('pause');
             this.game.startMatch();
-            this.game.input.lockPointer(document.body);
         });
         
         document.getElementById('btn-quit').addEventListener('click', () => {
             this.hideOverlay('pause');
             this.hideScreen('game');
             this.showScreen('menu');
-            this.game.input.unlockPointer();
         });
         
         // Game over
         document.getElementById('btn-play-again').addEventListener('click', () => {
             this.hideOverlay('gameOver');
             this.game.startMatch();
-            this.game.input.lockPointer(document.body);
         });
         
         document.getElementById('btn-menu').addEventListener('click', () => {
             this.hideOverlay('gameOver');
             this.hideScreen('game');
             this.showScreen('menu');
-            this.game.input.unlockPointer();
         });
     }
     
@@ -221,7 +215,6 @@ export class UIManager {
         this.game.onStateChange = (newState, oldState) => {
             if (newState === 'paused') {
                 this.showOverlay('pause');
-                this.game.input.unlockPointer();
             }
             
             if (newState === 'game_over') {
@@ -231,7 +224,6 @@ export class UIManager {
                 document.getElementById('final-score').textContent = 
                     `${this.game.score.player} - ${this.game.score.opponent}`;
                 this.showOverlay('gameOver');
-                this.game.input.unlockPointer();
             }
         };
         

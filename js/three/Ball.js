@@ -60,11 +60,17 @@ export class BallMesh {
             color: 0xffffff,
             roughness: 0.4,
             metalness: 0.0,
+            emissive: 0xffffff,
+            emissiveIntensity: 0.15,
         });
         
         this.mesh = new THREE.Mesh(geometry, material);
         this.mesh.castShadow = true;
         this.scene.add(this.mesh);
+        
+        // Glow light that follows the ball
+        this.glowLight = new THREE.PointLight(0xffffcc, 0.8, 1.5);
+        this.scene.add(this.glowLight);
         
         // Trail effect
         this.trailPositions = [];
@@ -161,6 +167,11 @@ export class BallMesh {
             }
         }
         this.trailMesh.geometry.attributes.position.needsUpdate = true;
+        
+        // Update glow light
+        if (this.glowLight) {
+            this.glowLight.position.copy(position);
+        }
         
         // Update shadow blob
         if (position.y < 1.5) {

@@ -159,7 +159,7 @@ export class Game {
         const ballState = this.physics.getBallState();
         const paddlePos = this.paddle.getHitPosition();
         const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
-        const canHitBall = ballState.active && distToBall < 2.00 && ballState.lastHitBy !== 'player';
+        const canHitBall = ballState.active && distToBall < 0.35 && ballState.lastHitBy !== 'player';
         
         // ---- DEBUGGER: Log click attempt ----
         if (justClicked && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
@@ -174,36 +174,24 @@ export class Game {
         
         // DEBUG: log all clicks
         if (justClicked) {
-            console.log('CLICK detected! state=' + this.state + ' ballActive=' + ballState.active + ' ballZ=' + (ballState.position?.z?.toFixed(2) || '--'));
         }
         
         // Player serve: click to auto-toss then hit
         if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
             if (justClicked) {
-                console.log('SERVE: tossing ball');
                 this.tossBall();
             }
         }
         
-        // Check for player hit during serving/rally
+        // INSTANT HIT: when player clicks, check distance and hit immediately
         if ((this.state === GameState.SERVING || this.state === GameState.RALLY) && ballState.active) {
             if (justClicked) {
-                console.log('SWING triggered');
                 this.paddle.triggerSwing();
+                // Hit immediately if ball is within generous range
+                if (distToBall < 0.70 && ballState.lastHitBy !== 'player') {
+                    this.processPaddleHit(ballState, paddlePos, distToBall);
+                }
             }
-        }
-        
-        // Process paddle contact during swing
-        if (this.paddle.canHit()) {
-            this.checkPaddleContact();
-        }
-        
-        // DEBUG: extremely generous auto-hit fallback (2m radius)
-        const inAutoHitZone = ballState.active && distToBall < 2.00 && ballState.lastHitBy !== 'player' && 
-            this.paddle.swingState === 'ready';
-        if (inAutoHitZone) {
-            console.log('AUTO-HIT at dist=' + distToBall.toFixed(2));
-            this.paddle.triggerSwing();
         }
         
         // Update opponent AI
@@ -240,7 +228,7 @@ export class Game {
         }
         
         // Update debug UI
-        this.updateDebugUI(ballState, paddlePos, distToBall, justClicked);
+        this.updateDebugUI(ballState, paddlePos, distToBall, justClicked, this.input);
         
         // Update paddle position
         this.paddle.update(this.input, dt, ballState.position, ballState.active, canHitBall);
@@ -270,7 +258,7 @@ export class Game {
         this.frameCount = (this.frameCount || 0) + 1;
     }
     
-    updateDebugUI(ballState, paddlePos, distToBall, justClicked) {
+    updateDebugUI(ballState, paddlePos, distToBall, justClicked, input) {
         // Real-time status
         const status = this.debugger.getRealTimeStatus(ballState, paddlePos, this.paddle.swingState, distToBall);
         const debugInfo = document.getElementById('debug-info');
@@ -279,6 +267,7 @@ export class Game {
 <span style="color:#0f0">${status.canHit ? '✓ CAN HIT' : '✗ TOO FAR'}</span> | 
 dist: ${status.dist}m | ballZ: ${status.ballZ} | ballY: ${status.ballY}<br>
 swing: ${status.swingState} | clicked: ${justClicked} | lastHit: ${status.lastHitBy}<br>
+mouseX: ${input.mouse.x.toFixed(2)} | virtualX: ${input.virtualMouseX.toFixed(2)} | touch: ${input.isTouch}<br>
 Clicks: ${status.sessionClicks} | Hits: ${status.sessionHits} | Auto: ${status.sessionAutoHits} | Miss: ${status.sessionMisses}
             `.trim();
         }
@@ -396,8 +385,7 @@ Top Miss Reason: ${s.topMissReason}
         const dist = paddlePos.distanceTo(ballState.position);
         
         // DEBUG: huge hit radius for testing
-        if (dist > 2.00) {
-            console.log('MISS: too far', dist.toFixed(2));
+        if (dist > 0.50) {
             this.debugger.logMiss(this.frameCount || 0, 'too_far', { dist });
             return;
         }
@@ -407,7 +395,6 @@ Top Miss Reason: ${s.topMissReason}
             return;
         }
         
-        console.log('HIT! dist=' + dist.toFixed(2) + 'm');
         this.paddle.markHit();
         this.processPaddleHit(ballState, paddlePos, dist);
     }

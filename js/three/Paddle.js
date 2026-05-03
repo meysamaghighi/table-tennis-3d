@@ -166,10 +166,18 @@ export class PaddleMesh {
         const reachY = 0.5;
         const baseZ = 0.92 + input.playerOffset.z * 0.2;
         
-        // USE VIRTUAL MOUSE (movement accumulation) - works even when pointer is locked/hidden
-        // Fall back to regular mouse.x if virtual hasn't been used
-        const mouseX = input.virtualMouseX !== 0 ? input.virtualMouseX : input.mouse.x;
-        const mouseY = input.virtualMouseY !== 0 ? input.virtualMouseY : input.mouse.y;
+        // Use absolute cursor position (most reliable across all devices)
+        // virtualMouse is fallback for relative movement scenarios
+        let mouseX = input.mouse.x;
+        let mouseY = input.mouse.y;
+        
+        // If virtual mouse has been moved significantly, blend it in
+        if (Math.abs(input.virtualMouseX) > 0.05) {
+            mouseX = input.virtualMouseX;
+        }
+        if (Math.abs(input.virtualMouseY) > 0.05) {
+            mouseY = input.virtualMouseY;
+        }
         
         let targetX = mouseX * reachX + input.playerOffset.x;
         let targetY = 0.82 + mouseY * reachY;
@@ -219,12 +227,8 @@ export class PaddleMesh {
             0 - paddleAngle
         );
         
-        this.hitZoneMesh.position.copy(this.getHitPosition());
-        if (canHitBall && ballActive) {
-            this.hitZoneMesh.material.opacity = 0.12 + Math.sin(Date.now() * 0.01) * 0.06;
-        } else {
-            this.hitZoneMesh.material.opacity *= 0.9;
-        }
+        // Hit zone visualization hidden for clean gameplay
+        this.hitZoneMesh.visible = false;
     }
     
     updateSwing(dt) {

@@ -37,17 +37,17 @@ export class InputManager {
     }
     
     setupListeners() {
-        // Mouse move - use BOTH client coordinates AND movement accumulation
+        const canvas = document.getElementById('game-canvas');
+        
+        // Mouse move - ALWAYS track mouse, even if touch is also active
         this._boundHandlers.mousemove = (e) => {
-            if (this.isTouch) return;
-            
-            // Always accumulate movement for virtual position
+            // Accumulate movement for virtual position
             this.virtualMouseX += e.movementX * this.mouseSensitivity;
             this.virtualMouseY -= e.movementY * this.mouseSensitivity;
             this.virtualMouseX = Math.max(-1, Math.min(1, this.virtualMouseX));
             this.virtualMouseY = Math.max(-1, Math.min(1, this.virtualMouseY));
             
-            // Also track absolute position as fallback
+            // Also track absolute position
             this.mouseRaw.x = e.clientX;
             this.mouseRaw.y = e.clientY;
             this.mouse.dx = e.movementX || 0;
@@ -56,23 +56,28 @@ export class InputManager {
             this.updateMouseFromClient(e.clientX, e.clientY);
         };
         
-        // Mouse buttons
+        // Mouse buttons - ALWAYS handle, don't block by isTouch
         this._boundHandlers.mousedown = (e) => {
-            if (this.isTouch) return;
             if (e.button === 0) {
                 this.isMouseDown = true;
                 this.clicked = true;
             }
         };
         
+        // Click handler on canvas (more reliable on trackpads)
+        if (canvas) {
+            this._boundHandlers.canvasclick = (e) => {
+                this.clicked = true;
+            };
+            canvas.addEventListener('click', this._boundHandlers.canvasclick);
+        }
+        
         this._boundHandlers.mouseup = (e) => {
-            if (this.isTouch) return;
             if (e.button === 0) this.isMouseDown = false;
         };
         
         // Scroll for paddle angle
         this._boundHandlers.wheel = (e) => {
-            if (this.isTouch) return;
             e.preventDefault();
             this.scrollDelta += e.deltaY;
             this.paddleAngleTarget += e.deltaY * 0.001;
@@ -82,7 +87,10 @@ export class InputManager {
         // Keyboard
         this._boundHandlers.keydown = (e) => {
             this.keys[e.code] = true;
-            if (e.code === 'Space') e.preventDefault();
+            if (e.code === 'Space') {
+                e.preventDefault();
+                this.clicked = true; // Space bar = swing!
+            }
             this.emit('keydown', e.code);
         };
         
@@ -92,7 +100,6 @@ export class InputManager {
         };
         
         // Touch events for mobile
-        const canvas = document.getElementById('game-canvas');
         if (canvas) {
             this._boundHandlers.touchstart = (e) => {
                 e.preventDefault();
@@ -187,7 +194,6 @@ export class InputManager {
     justClicked() {
         const result = this.clicked || (this.isMouseDown && !this.wasMouseDown);
         if (result) {
-            console.log('Input.justClicked=true | clicked=' + this.clicked + ' isMouseDown=' + this.isMouseDown + ' wasMouseDown=' + this.wasMouseDown);
         }
         return result;
     }
@@ -217,12 +223,14 @@ export class InputManager {
         window.removeEventListener('keydown', this._boundHandlers.keydown);
         window.removeEventListener('keyup', this._boundHandlers.keyup);
         
-        const canvas = document.getElementById('game-canvas');
         if (canvas) {
             canvas.removeEventListener('touchstart', this._boundHandlers.touchstart);
             canvas.removeEventListener('touchmove', this._boundHandlers.touchmove);
             canvas.removeEventListener('touchend', this._boundHandlers.touchend);
             canvas.removeEventListener('touchcancel', this._boundHandlers.touchcancel);
+            if (this._boundHandlers.canvasclick) {
+                canvas.removeEventListener('click', this._boundHandlers.canvasclick);
+            }
         }
     }
 }

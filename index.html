@@ -192,6 +192,32 @@
         }
     }
     </script>
+    <script>
+        // Global error catcher - shows errors on loading screen
+        window.addEventListener('error', (e) => {
+            const loading = document.getElementById('loading-screen');
+            if (loading) {
+                loading.innerHTML = '<div style="padding:40px;text-align:center;color:#ff6b35;"><h2>⚠️ Error</h2><p style="color:#fff;font-family:monospace;white-space:pre-wrap;">' + e.message + '</p><p style="color:#888;margin-top:20px;">' + (e.filename || '') + ':' + (e.lineno || '') + '</p><button onclick="location.reload()" style="margin-top:30px;padding:12px 30px;font-size:1rem;background:#ff6b35;color:white;border:none;border-radius:8px;cursor:pointer;">Reload</button></div>';
+            }
+            console.error('GLOBAL ERROR:', e.message, e.filename, e.lineno);
+        });
+        window.addEventListener('unhandledrejection', (e) => {
+            const loading = document.getElementById('loading-screen');
+            if (loading) {
+                loading.innerHTML = '<div style="padding:40px;text-align:center;color:#ff6b35;"><h2>⚠️ Async Error</h2><p style="color:#fff;font-family:monospace;">' + (e.reason?.message || e.reason) + '</p><button onclick="location.reload()" style="margin-top:30px;padding:12px 30px;font-size:1rem;background:#ff6b35;color:white;border:none;border-radius:8px;cursor:pointer;">Reload</button></div>';
+            }
+            console.error('UNHANDLED REJECTION:', e.reason);
+        });
+        // Auto-hide loading after 8s as fallback
+        setTimeout(() => {
+            const loading = document.getElementById('loading-screen');
+            const menu = document.getElementById('main-menu');
+            if (loading && loading.style.display !== 'none' && menu) {
+                loading.style.display = 'none';
+                menu.classList.add('active');
+            }
+        }, 8000);
+    </script>
     <script type="module" src="js/main.js"></script>
 </body>
 </html>

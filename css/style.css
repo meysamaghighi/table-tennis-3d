@@ -580,12 +580,13 @@ kbd {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 3rem;
+    font-size: 2.2rem;
     font-weight: 900;
     text-shadow: 0 0 40px rgba(0,0,0,0.8);
     pointer-events: none;
     transition: opacity 0.3s;
     text-align: center;
+    max-width: 90%;
 }
 
 /* Crosshair */
@@ -676,56 +677,31 @@ kbd {
     letter-spacing: 2px;
 }
 
-/* Debug info */
+/* Debug info - hidden by default, minimal when shown */
 #debug-info {
     position: absolute;
-    bottom: 10px;
-    left: 10px;
+    bottom: 6px;
+    left: 6px;
     font-family: monospace;
-    font-size: 0.72rem;
-    color: rgba(255,255,255,0.7);
-    background: rgba(0,0,0,0.6);
-    padding: 6px 10px;
-    border-radius: 6px;
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.5);
+    background: rgba(0,0,0,0.4);
+    padding: 4px 8px;
+    border-radius: 4px;
     pointer-events: none;
     z-index: 6;
-    line-height: 1.5;
-    max-width: 320px;
-}
-
-#debug-diagnosis {
-    position: absolute;
-    top: 130px;
-    left: 10px;
-    font-family: monospace;
-    font-size: 0.72rem;
-    color: rgba(255,255,255,0.85);
-    background: rgba(0,0,0,0.7);
-    padding: 10px 12px;
-    border-radius: 6px;
-    pointer-events: none;
-    z-index: 6;
-    line-height: 1.5;
+    line-height: 1.4;
     max-width: 280px;
-    display: none;
-    border-left: 3px solid #ff6b35;
+    display: none; /* Hidden by default */
 }
 
+body.debug-mode #debug-info {
+    display: block;
+}
+
+#debug-diagnosis,
 #debug-summary {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-family: monospace;
-    font-size: 0.72rem;
-    color: rgba(255,255,255,0.8);
-    background: rgba(0,0,0,0.6);
-    padding: 8px 12px;
-    border-radius: 6px;
-    pointer-events: none;
-    z-index: 6;
-    line-height: 1.5;
-    max-width: 200px;
-    text-align: left;
+    display: none !important;
 }
 
 /* Overlays */
