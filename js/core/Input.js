@@ -185,7 +185,11 @@ export class InputManager {
     }
     
     justClicked() {
-        return this.clicked || (this.isMouseDown && !this.wasMouseDown);
+        const result = this.clicked || (this.isMouseDown && !this.wasMouseDown);
+        if (result) {
+            console.log('Input.justClicked=true | clicked=' + this.clicked + ' isMouseDown=' + this.isMouseDown + ' wasMouseDown=' + this.wasMouseDown);
+        }
+        return result;
     }
     
     triggerSwing() {

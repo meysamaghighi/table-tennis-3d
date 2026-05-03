@@ -146,7 +146,10 @@ export class Game {
             return;
         }
         
-        // Update input
+        // CRITICAL: Read click BEFORE input.update() clears it!
+        const justClicked = this.input.justClicked();
+        
+        // Update input (clears click flags)
         this.input.update(dt);
         
         // Update physics
@@ -157,7 +160,6 @@ export class Game {
         const paddlePos = this.paddle.getHitPosition();
         const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
         const canHitBall = ballState.active && distToBall < 2.00 && ballState.lastHitBy !== 'player';
-        const justClicked = this.input.justClicked();
         
         // ---- DEBUGGER: Log click attempt ----
         if (justClicked && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
