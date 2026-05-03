@@ -1,6 +1,5 @@
 /**
- * Player Paddle
- * Realistic paddle geometry with rubber visualization and swing animation.
+ * Player Paddle with realistic rounded blade shape
  */
 
 import * as THREE from 'three';
@@ -10,32 +9,61 @@ export class PaddleMesh {
         this.scene = scene;
         this.group = new THREE.Group();
         
-        // Blade dimensions (in meters)
-        const bladeW = 0.15;
-        const bladeH = 0.16;
-        const bladeThickness = 0.006;
-        const handleW = 0.035;
         const handleH = 0.09;
         const handleThickness = 0.028;
         
-        // Blade
-        const bladeGeo = new THREE.BoxGeometry(bladeW, bladeH, bladeThickness);
+        // --- Rounded blade using Shape + ExtrudeGeometry ---
+        const bladeW = 0.075;  // half-width
+        const bladeH = 0.08;   // half-height
+        const cornerR = 0.025;
+        
+        const bladeShape = new THREE.Shape();
+        // Start at bottom center
+        bladeShape.moveTo(0, -bladeH + cornerR);
+        // Bottom left corner
+        bladeShape.quadraticCurveTo(-bladeW, -bladeH, -bladeW + cornerR, -bladeH);
+        // Left side
+        bladeShape.lineTo(bladeW - cornerR, -bladeH);
+        // Bottom right corner
+        bladeShape.quadraticCurveTo(bladeW, -bladeH, bladeW, -bladeH + cornerR);
+        // Right side up
+        bladeShape.lineTo(bladeW, bladeH - cornerR);
+        // Top right corner
+        bladeShape.quadraticCurveTo(bladeW, bladeH, bladeW - cornerR, bladeH);
+        // Top side
+        bladeShape.lineTo(-bladeW + cornerR, bladeH);
+        // Top left corner
+        bladeShape.quadraticCurveTo(-bladeW, bladeH, -bladeW, bladeH - cornerR);
+        // Close
+        bladeShape.lineTo(-bladeW, -bladeH + cornerR);
+        
+        const bladeThickness = 0.006;
+        const extrudeSettings = {
+            depth: bladeThickness,
+            bevelEnabled: true,
+            bevelThickness: 0.002,
+            bevelSize: 0.002,
+            bevelSegments: 3,
+        };
+        
+        const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, extrudeSettings);
+        // Center the extrusion
+        bladeGeo.translate(0, handleH / 2 + bladeH * 0.3, -bladeThickness / 2);
+        
         const bladeMat = new THREE.MeshStandardMaterial({
             color: 0x8B4513,
             roughness: 0.6,
             metalness: 0.1,
         });
         this.blade = new THREE.Mesh(bladeGeo, bladeMat);
-        this.blade.position.y = handleH / 2 + bladeH / 2 - 0.01;
         this.blade.castShadow = true;
         this.group.add(this.blade);
         
-        // Handle (flared style)
-        const handleGeo = new THREE.BoxGeometry(handleW, handleH, handleThickness);
+        // Handle
+        const handleGeo = new THREE.BoxGeometry(0.035, handleH, handleThickness);
         const handleMat = new THREE.MeshStandardMaterial({
             color: 0x5c3a1e,
             roughness: 0.5,
-            metalness: 0.0,
         });
         this.handle = new THREE.Mesh(handleGeo, handleMat);
         this.handle.position.y = -0.02;
@@ -43,46 +71,77 @@ export class PaddleMesh {
         this.group.add(this.handle);
         
         // Handle flare
-        const flareGeo = new THREE.BoxGeometry(handleW * 1.3, 0.02, handleThickness);
-        const flare = new THREE.Mesh(flareGeo, handleMat);
+        const flare = new THREE.Mesh(
+            new THREE.BoxGeometry(0.045, 0.02, handleThickness),
+            handleMat
+        );
         flare.position.y = -handleH / 2 + 0.01;
         this.group.add(flare);
         
-        // Rubber forehand - on negative local z side (faces opponent for player)
+        // Rubber forehand
         const rubberThick = 0.003;
-        const rubberGeo = new THREE.BoxGeometry(bladeW - 0.002, bladeH - 0.002, rubberThick);
+        const rubberGeo = new THREE.ExtrudeGeometry(bladeShape, {
+            depth: rubberThick,
+            bevelEnabled: false,
+        });
+        rubberGeo.translate(0, handleH / 2 + bladeH * 0.3, -(bladeThickness + rubberThick));
+        
         this.rubberMat = new THREE.MeshStandardMaterial({
             color: 0xb71c1c,
             roughness: 0.5,
             metalness: 0.0,
         });
         this.rubber = new THREE.Mesh(rubberGeo, this.rubberMat);
-        this.rubber.position.set(0, handleH / 2 + bladeH / 2 - 0.01, -(bladeThickness / 2 + rubberThick / 2));
         this.group.add(this.rubber);
         
-        // Rubber backhand - on positive local z side
-        this.rubberBack = new THREE.Mesh(rubberGeo, this.rubberMat.clone());
-        this.rubberBack.position.set(0, handleH / 2 + bladeH / 2 - 0.01, bladeThickness / 2 + rubberThick / 2);
+        // Rubber backhand
+        const rubberBackGeo = new THREE.ExtrudeGeometry(bladeShape, {
+            depth: rubberThick,
+            bevelEnabled: false,
+        });
+        rubberBackGeo.translate(0, handleH / 2 + bladeH * 0.3, bladeThickness);
+        this.rubberBack = new THREE.Mesh(rubberBackGeo, this.rubberMat.clone());
         this.group.add(this.rubberBack);
         
-        // Edge tape
-        const edgeGeo = new THREE.BoxGeometry(bladeW + 0.002, bladeH + 0.002, bladeThickness + rubberThick * 2 + 0.002);
-        const edgeMat = new THREE.MeshStandardMaterial({
-            color: 0x222222,
-            roughness: 0.7,
-        });
-        const edge = new THREE.Mesh(edgeGeo, edgeMat);
-        edge.position.y = handleH / 2 + bladeH / 2 - 0.01;
-        edge.scale.set(1.01, 1.01, 1.01);
-        this.group.add(edge);
+        // Edge tape (thin ring around blade)
+        const tapeShape = new THREE.Shape();
+        const tw = bladeW + 0.003;
+        const th = bladeH + 0.003;
+        const tr = cornerR + 0.003;
+        tapeShape.moveTo(0, -th + tr);
+        tapeShape.quadraticCurveTo(-tw, -th, -tw + tr, -th);
+        tapeShape.lineTo(tw - tr, -th);
+        tapeShape.quadraticCurveTo(tw, -th, tw, -th + tr);
+        tapeShape.lineTo(tw, th - tr);
+        tapeShape.quadraticCurveTo(tw, th, tw - tr, th);
+        tapeShape.lineTo(-tw + tr, th);
+        tapeShape.quadraticCurveTo(-tw, th, -tw, th - tr);
+        tapeShape.lineTo(-tw, -th + tr);
         
-        // Logo on rubber
-        this.updateLogo();
+        const holeShape = new THREE.Path();
+        holeShape.moveTo(0, -bladeH + cornerR);
+        holeShape.quadraticCurveTo(-bladeW, -bladeH, -bladeW + cornerR, -bladeH);
+        holeShape.lineTo(bladeW - cornerR, -bladeH);
+        holeShape.quadraticCurveTo(bladeW, -bladeH, bladeW, -bladeH + cornerR);
+        holeShape.lineTo(bladeW, bladeH - cornerR);
+        holeShape.quadraticCurveTo(bladeW, bladeH, bladeW - cornerR, bladeH);
+        holeShape.lineTo(-bladeW + cornerR, bladeH);
+        holeShape.quadraticCurveTo(-bladeW, bladeH, -bladeW, bladeH - cornerR);
+        holeShape.lineTo(-bladeW, -bladeH + cornerR);
+        tapeShape.holes.push(holeShape);
+        
+        const tapeGeo = new THREE.ExtrudeGeometry(tapeShape, {
+            depth: bladeThickness + rubberThick * 2 + 0.002,
+            bevelEnabled: false,
+        });
+        tapeGeo.translate(0, handleH / 2 + bladeH * 0.3, -(bladeThickness / 2 + rubberThick + 0.001));
+        const tapeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
+        this.group.add(new THREE.Mesh(tapeGeo, tapeMat));
         
         this.scene.add(this.group);
         
-        // Swing animation state
-        this.swingState = 'ready'; // ready, backswing, forward, follow, recovery
+        // Swing state
+        this.swingState = 'ready';
         this.swingTimer = 0;
         this.swingDuration = {
             backswing: 0.08,
@@ -91,11 +150,7 @@ export class PaddleMesh {
             recovery: 0.12,
         };
         
-        // Base transform - positioned near the hitting zone
         this.basePosition = new THREE.Vector3(0, 1.0, 0.92);
-        this.baseRotation = new THREE.Euler(0, 0, 0);
-        
-        // Hit tracking
         this.hasHitThisSwing = false;
         
         // Hit zone indicator
@@ -111,24 +166,17 @@ export class PaddleMesh {
         this.scene.add(this.hitZoneMesh);
     }
     
-    updateLogo() {
-        // Could add texture with logo here
-    }
-    
     setRubberColor(color) {
         this.rubberMat.color.set(color);
         this.rubberBack.material.color.set(color);
     }
     
     update(input, dt, ballPosition, ballActive, canHitBall) {
-        // Position paddle based on mouse/touch (with player offset)
         const reachX = 0.9;
         const reachY = 0.5;
-        
-        // Base Z at hitting zone ~0.92m
         const baseZ = 0.92 + input.playerOffset.z * 0.2;
         
-        // Auto-track ball horizontally (40% auto-aim) for easier play
+        // Auto-track ball
         let targetX = input.mouse.x * reachX + input.playerOffset.x;
         let targetY = 0.82 + input.mouse.y * reachY;
         
@@ -137,63 +185,45 @@ export class PaddleMesh {
             targetY = targetY * 0.65 + ballPosition.y * 0.35;
         }
         
-        const targetZ = baseZ;
+        this.basePosition.set(
+            targetX + Math.sin(Date.now() * 0.002) * 0.005,
+            targetY + Math.cos(Date.now() * 0.0015) * 0.003,
+            baseZ
+        );
         
-        // Add some natural sway
-        const swayX = Math.sin(Date.now() * 0.002) * 0.005;
-        const swayY = Math.cos(Date.now() * 0.0015) * 0.003;
+        this.updateSwing(dt);
         
-        this.basePosition.x = targetX + swayX;
-        this.basePosition.y = targetY + swayY;
-        this.basePosition.z = targetZ;
-        
-        // Update swing animation
-        this.updateSwing(dt, ballPosition, ballActive);
-        
-        // Apply transforms
         this.group.position.copy(this.basePosition);
         
-        // Rotation: paddle angle from scroll/touch + swing rotation
         const paddleAngle = input.paddleAngle;
-        
-        // Calculate rotation based on swing state
         let swingRotX = 0;
-        let swingRotZ = 0;
         let swingOffsetZ = 0;
         
         switch (this.swingState) {
             case 'backswing':
-                const backProgress = this.swingTimer / this.swingDuration.backswing;
-                swingRotX = -0.3 * backProgress;
-                swingOffsetZ = 0.08 * backProgress;
+                const bp = this.swingTimer / this.swingDuration.backswing;
+                swingRotX = -0.3 * bp;
+                swingOffsetZ = 0.08 * bp;
                 break;
             case 'forward':
-                const fwdProgress = this.swingTimer / this.swingDuration.forward;
-                swingRotX = -0.3 + 0.6 * fwdProgress;
-                swingOffsetZ = 0.08 - 0.25 * fwdProgress;
+                const fp = this.swingTimer / this.swingDuration.forward;
+                swingRotX = -0.3 + 0.6 * fp;
+                swingOffsetZ = 0.08 - 0.25 * fp;
                 break;
             case 'follow':
-                const folProgress = this.swingTimer / this.swingDuration.follow;
-                swingRotX = 0.3 * (1 - folProgress);
-                swingOffsetZ = -0.17 * (1 - folProgress);
-                break;
-            case 'recovery':
-                swingRotX = 0;
-                swingOffsetZ = 0;
+                const fop = this.swingTimer / this.swingDuration.follow;
+                swingRotX = 0.3 * (1 - fop);
+                swingOffsetZ = -0.17 * (1 - fop);
                 break;
         }
         
-        // Apply swing offset
         this.group.position.z += swingOffsetZ;
-        
-        // Set rotation
         this.group.rotation.set(
             swingRotX + paddleAngle * 0.5,
             -input.mouse.x * 0.35,
-            swingRotZ - paddleAngle
+            0 - paddleAngle
         );
         
-        // Update hit zone indicator
         this.hitZoneMesh.position.copy(this.getHitPosition());
         if (canHitBall && ballActive) {
             this.hitZoneMesh.material.opacity = 0.12 + Math.sin(Date.now() * 0.01) * 0.06;
@@ -202,32 +232,13 @@ export class PaddleMesh {
         }
     }
     
-    updateSwing(dt, ballPosition, ballActive) {
-        if (this.swingState === 'ready') {
-            return;
-        }
-        
+    updateSwing(dt) {
+        if (this.swingState === 'ready') return;
         this.swingTimer += dt;
-        
-        const currentDuration = this.swingDuration[this.swingState];
-        
-        if (this.swingTimer >= currentDuration) {
+        if (this.swingTimer >= this.swingDuration[this.swingState]) {
             this.swingTimer = 0;
-            
-            switch (this.swingState) {
-                case 'backswing':
-                    this.swingState = 'forward';
-                    break;
-                case 'forward':
-                    this.swingState = 'follow';
-                    break;
-                case 'follow':
-                    this.swingState = 'recovery';
-                    break;
-                case 'recovery':
-                    this.swingState = 'ready';
-                    break;
-            }
+            const next = { backswing: 'forward', forward: 'follow', follow: 'recovery', recovery: 'ready' };
+            this.swingState = next[this.swingState];
         }
     }
     
@@ -237,10 +248,6 @@ export class PaddleMesh {
             this.swingTimer = 0;
             this.hasHitThisSwing = false;
         }
-    }
-    
-    isHitting() {
-        return this.swingState === 'forward';
     }
     
     canHit() {
@@ -253,16 +260,13 @@ export class PaddleMesh {
     
     getHitPosition() {
         const pos = this.group.position.clone();
-        const forward = new THREE.Vector3(0, 0, -1);
-        forward.applyQuaternion(this.group.quaternion);
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.group.quaternion);
         pos.add(forward.multiplyScalar(0.015));
         return pos;
     }
     
     getPaddleNormal() {
-        const normal = new THREE.Vector3(0, 0, -1);
-        normal.applyQuaternion(this.group.quaternion);
-        return normal.normalize();
+        return new THREE.Vector3(0, 0, -1).applyQuaternion(this.group.quaternion).normalize();
     }
     
     getPaddleVelocity() {

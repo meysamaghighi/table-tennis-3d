@@ -1,16 +1,13 @@
 /**
- * 3D Scene Setup
- * Renderer, camera, lighting, and environment.
+ * 3D Scene Setup - Third-person broadcast view
  */
 
 import * as THREE from 'three';
-import { TABLE_LENGTH, TABLE_WIDTH, TABLE_HEIGHT } from '../core/Physics.js';
 
 export class SceneManager {
     constructor(canvas) {
         this.canvas = canvas;
         
-        // Renderer
         this.renderer = new THREE.WebGLRenderer({ 
             canvas, 
             antialias: true,
@@ -24,71 +21,70 @@ export class SceneManager {
         this.renderer.toneMappingExposure = 1.2;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         
-        // Scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x1a1a2e);
-        this.scene.fog = new THREE.Fog(0x1a1a2e, 5, 15);
+        this.scene.fog = new THREE.Fog(0x1a1a2e, 8, 20);
         
-        // Camera - First person from player side
+        // Third-person broadcast camera - positioned to see full table
         this.camera = new THREE.PerspectiveCamera(
-            70, 
+            50, 
             window.innerWidth / window.innerHeight, 
             0.01, 
             50
         );
-        this.camera.position.set(0, 1.30, 1.5);
+        // Positioned behind player, elevated, looking down the table
+        this.camera.position.set(0, 2.8, 3.6);
+        this.camera.lookAt(0, 0.5, 0);
         
         this.setupLighting();
         this.setupEnvironment();
         
-        // Resize handler
         this._resizeHandler = () => this.onResize();
         window.addEventListener('resize', this._resizeHandler);
     }
     
     setupLighting() {
-        // Ambient
-        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.45);
         this.scene.add(ambient);
         
-        // Main overhead light (simulating venue lighting)
+        // Main overhead light
         const mainLight = new THREE.DirectionalLight(0xfff5e6, 1.5);
-        mainLight.position.set(0, 4, 0);
+        mainLight.position.set(0, 5, 1);
         mainLight.castShadow = true;
         mainLight.shadow.mapSize.width = 2048;
         mainLight.shadow.mapSize.height = 2048;
         mainLight.shadow.camera.near = 0.5;
-        mainLight.shadow.camera.far = 10;
-        mainLight.shadow.camera.left = -3;
-        mainLight.shadow.camera.right = 3;
-        mainLight.shadow.camera.top = 3;
-        mainLight.shadow.camera.bottom = -3;
+        mainLight.shadow.camera.far = 12;
+        mainLight.shadow.camera.left = -4;
+        mainLight.shadow.camera.right = 4;
+        mainLight.shadow.camera.top = 4;
+        mainLight.shadow.camera.bottom = -4;
         mainLight.shadow.bias = -0.0005;
         this.scene.add(mainLight);
         
-        // Fill light from front
-        const fillLight = new THREE.DirectionalLight(0xcce0ff, 0.3);
-        fillLight.position.set(0, 2, 3);
+        // Fill from front
+        const fillLight = new THREE.DirectionalLight(0xcce0ff, 0.35);
+        fillLight.position.set(0, 2, 4);
         this.scene.add(fillLight);
         
-        // Rim light from back
-        const rimLight = new THREE.DirectionalLight(0xffaa77, 0.4);
+        // Rim from back
+        const rimLight = new THREE.DirectionalLight(0xffaa77, 0.35);
         rimLight.position.set(0, 3, -4);
         this.scene.add(rimLight);
         
-        // Subtle point lights for atmosphere
-        const pl1 = new THREE.PointLight(0xff8844, 0.3, 6);
-        pl1.position.set(-2, 2.5, -1);
+        // Subtle point lights
+        const pl1 = new THREE.PointLight(0xff8844, 0.25, 8);
+        pl1.position.set(-2.5, 3, 0);
         this.scene.add(pl1);
         
-        const pl2 = new THREE.PointLight(0x4488ff, 0.2, 6);
-        pl2.position.set(2, 2.5, -1);
+        const pl2 = new THREE.PointLight(0x4488ff, 0.2, 8);
+        pl2.position.set(2.5, 3, 0);
         this.scene.add(pl2);
     }
     
     setupEnvironment() {
         // Floor
-        const floorGeo = new THREE.PlaneGeometry(20, 20);
+        const floorGeo = new THREE.PlaneGeometry(24, 24);
         const floorMat = new THREE.MeshStandardMaterial({
             color: 0x2a2a3a,
             roughness: 0.8,
@@ -99,86 +95,85 @@ export class SceneManager {
         floor.receiveShadow = true;
         this.scene.add(floor);
         
-        // Floor markings (court lines)
-        const lineGeo = new THREE.PlaneGeometry(TABLE_WIDTH + 2, 0.05);
+        // Court center line on floor
+        const lineGeo = new THREE.PlaneGeometry(2.0, 0.04);
         const lineMat = new THREE.MeshBasicMaterial({ color: 0x444466 });
-        
         const centerLine = new THREE.Mesh(lineGeo, lineMat);
         centerLine.rotation.x = -Math.PI / 2;
         centerLine.position.y = 0.002;
         this.scene.add(centerLine);
         
-        // Back walls
+        // Back wall
         const wallMat = new THREE.MeshStandardMaterial({
             color: 0x1e1e2e,
             roughness: 0.9,
         });
-        
-        const backWall = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 8),
-            wallMat
-        );
-        backWall.position.set(0, 4, -5);
+        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(24, 10), wallMat);
+        backWall.position.set(0, 5, -6);
         backWall.receiveShadow = true;
         this.scene.add(backWall);
         
         // Side walls
-        const leftWall = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 8),
-            wallMat
-        );
-        leftWall.position.set(-6, 4, 0);
-        leftWall.rotation.y = Math.PI / 2;
-        leftWall.receiveShadow = true;
-        this.scene.add(leftWall);
-        
-        const rightWall = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 8),
-            wallMat
-        );
-        rightWall.position.set(6, 4, 0);
-        rightWall.rotation.y = -Math.PI / 2;
-        rightWall.receiveShadow = true;
-        this.scene.add(rightWall);
+        [-1, 1].forEach(side => {
+            const wall = new THREE.Mesh(new THREE.PlaneGeometry(24, 10), wallMat);
+            wall.position.set(side * 7, 5, 0);
+            wall.rotation.y = side * Math.PI / 2;
+            wall.receiveShadow = true;
+            this.scene.add(wall);
+        });
         
         // Ceiling
         const ceiling = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 20),
+            new THREE.PlaneGeometry(24, 24),
             new THREE.MeshStandardMaterial({ color: 0x151520, roughness: 1 })
         );
         ceiling.rotation.x = Math.PI / 2;
-        ceiling.position.y = 5;
+        ceiling.position.y = 6;
         this.scene.add(ceiling);
         
         // Spectator barriers
-        for (let side of [-1, 1]) {
+        [-1, 1].forEach(side => {
             const barrier = new THREE.Mesh(
-                new THREE.BoxGeometry(0.1, 0.6, 8),
+                new THREE.BoxGeometry(0.1, 0.6, 10),
                 new THREE.MeshStandardMaterial({ color: 0x333344 })
             );
-            barrier.position.set(side * (TABLE_WIDTH / 2 + 1.5), 0.3, 0);
+            barrier.position.set(side * 2.5, 0.3, 0);
             barrier.castShadow = true;
             this.scene.add(barrier);
-        }
+        });
     }
     
-    updateCameraPosition(playerOffset, paddlePosition) {
-        // Smooth camera following - closer to the action
-        const targetX = playerOffset.x * 0.4;
-        const targetY = 1.28 + Math.abs(playerOffset.z) * 0.05;
-        const targetZ = 1.45 + playerOffset.z * 0.2;
+    updateCameraPosition(playerOffset, paddlePosition, ballPosition) {
+        // Smooth third-person camera that follows the action
+        // Camera is positioned behind the player side, looking down the table
         
-        this.camera.position.x += (targetX - this.camera.position.x) * 0.1;
-        this.camera.position.y += (targetY - this.camera.position.y) * 0.1;
-        this.camera.position.z += (targetZ - this.camera.position.z) * 0.1;
+        const targetCamX = playerOffset.x * 0.3;
+        const targetCamY = 2.6 + Math.abs(playerOffset.z) * 0.1;
+        const targetCamZ = 3.4 + playerOffset.z * 0.2;
         
-        // Look at the table center with slight bias toward paddle
-        const lookTarget = new THREE.Vector3(
-            paddlePosition.x * 0.25,
-            0.75,
-            -0.3
-        );
-        this.camera.lookAt(lookTarget);
+        this.camera.position.x += (targetCamX - this.camera.position.x) * 0.06;
+        this.camera.position.y += (targetCamY - this.camera.position.y) * 0.06;
+        this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.06;
+        
+        // Look at a point that follows the ball slightly for dynamic feel
+        let lookX = 0;
+        let lookZ = -0.3;
+        
+        if (ballPosition && ballPosition.lengthSq() > 0) {
+            lookX = ballPosition.x * 0.25;
+            lookZ = ballPosition.z * 0.15;
+        }
+        
+        const lookTarget = new THREE.Vector3(lookX, 0.55, lookZ);
+        
+        // Smooth lookAt
+        const currentLook = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const targetLook = lookTarget.clone().sub(this.camera.position).normalize();
+        const blendedLook = currentLook.lerp(targetLook, 0.08);
+        
+        const m = new THREE.Matrix4();
+        m.lookAt(this.camera.position, this.camera.position.clone().add(blendedLook), new THREE.Vector3(0, 1, 0));
+        this.camera.quaternion.setFromRotationMatrix(m);
     }
     
     onResize() {

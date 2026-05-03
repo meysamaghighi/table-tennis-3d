@@ -8,6 +8,7 @@ import { PhysicsEngine, TABLE_LENGTH } from './Physics.js';
 import { Equipment } from './Equipment.js';
 import { EffectsManager } from '../three/Effects.js';
 import { AudioManager } from './Audio.js';
+import { GameDebugger } from './Debugger.js';
 
 const WINNING_SCORE = 11;
 const SERVE_CHANGE_INTERVAL = 2;
@@ -33,6 +34,7 @@ export class Game {
         this.audio = new AudioManager();
         this.physics = new PhysicsEngine();
         this.equipment = new Equipment();
+        this.debugger = new GameDebugger();
         
         this.state = GameState.MENU;
         this.score = { player: 0, opponent: 0 };
@@ -85,12 +87,14 @@ export class Game {
     
     startMatch() {
         this.audio.init();
+        this.debugger.resetSession();
         this.score = { player: 0, opponent: 0 };
         this.server = 'player';
         this.servesRemaining = SERVE_CHANGE_INTERVAL;
         this.resetBall();
         this.setState(GameState.SERVING);
         if (this.onServeChange) this.onServeChange(this.server);
+        this.debugger.startPoint();
     }
     
     resetBall() {
@@ -149,16 +153,33 @@ export class Game {
         const events = this.physics.update(dt);
         this.handlePhysicsEvents(events);
         
+        const ballState = this.physics.getBallState();
+        const paddlePos = this.paddle.getHitPosition();
+        const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
+        const canHitBall = ballState.active && distToBall < 0.60 && ballState.lastHitBy !== 'player';
+        const justClicked = this.input.justClicked();
+        
+        // ---- DEBUGGER: Log click attempt ----
+        if (justClicked && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
+            this.debugger.logClick(
+                this.frameCount || 0,
+                ballState,
+                paddlePos,
+                this.paddle.swingState,
+                distToBall
+            );
+        }
+        
         // Player serve: click to auto-toss then hit
         if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
-            if (this.input.justClicked()) {
+            if (justClicked) {
                 this.tossBall();
             }
         }
         
         // Check for player hit during serving/rally
-        if ((this.state === GameState.SERVING || this.state === GameState.RALLY) && this.physics.ball.active) {
-            if (this.input.justClicked()) {
+        if ((this.state === GameState.SERVING || this.state === GameState.RALLY) && ballState.active) {
+            if (justClicked) {
                 this.paddle.triggerSwing();
             }
         }
@@ -168,18 +189,14 @@ export class Game {
             this.checkPaddleContact();
         }
         
-        // GENEROUS auto-hit fallback: if ball is close and player didn't click, still hit it
-        const ballState2 = this.physics.getBallState();
-        const paddlePos2 = this.paddle.getHitPosition();
-        const dist2 = paddlePos2.distanceTo(ballState2.position);
-        const inAutoHitZone = ballState2.active && dist2 < 0.50 && ballState2.lastHitBy !== 'player' && 
-            this.paddle.swingState === 'ready' && ballState2.position.z > 0.1;
+        // GENEROUS auto-hit fallback
+        const inAutoHitZone = ballState.active && distToBall < 0.50 && ballState.lastHitBy !== 'player' && 
+            this.paddle.swingState === 'ready' && ballState.position.z > 0.1;
         if (inAutoHitZone) {
             this.paddle.triggerSwing();
         }
         
         // Update opponent AI
-        const ballState = this.physics.getBallState();
         this.opponent.update(dt, ballState, ballState.active);
         
         // Check opponent hit
@@ -196,10 +213,9 @@ export class Game {
             }
         }
         
-        // Check if ball is hittable (for visual feedback)
-        const paddlePos = this.paddle.getHitPosition();
-        const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
-        const canHitBall = distToBall < 0.60 && ballState.lastHitBy !== 'player';
+        // ---- DEBUGGER: Log states ----
+        this.debugger.logBallState(this.frameCount || 0, ballState);
+        this.debugger.logPaddleState(this.frameCount || 0, paddlePos);
         
         // Show CLICK prompt when ball is very close
         const clickPrompt = document.getElementById('click-prompt');
@@ -213,11 +229,8 @@ export class Game {
             }
         }
         
-        // Debug info
-        const debugInfo = document.getElementById('debug-info');
-        if (debugInfo) {
-            debugInfo.textContent = `dist: ${distToBall.toFixed(2)}m | state: ${this.paddle.swingState} | ballZ: ${ballState.position.z.toFixed(2)} | clicked: ${this.input.justClicked()}`;
-        }
+        // Update debug UI
+        this.updateDebugUI(ballState, paddlePos, distToBall, justClicked);
         
         // Update paddle position
         this.paddle.update(this.input, dt, ballState.position, ballState.active, canHitBall);
@@ -232,8 +245,8 @@ export class Game {
             this.physics.ball.velocity
         );
         
-        // Update camera
-        this.sceneManager.updateCameraPosition(this.input.playerOffset, this.paddle.group.position);
+        // Update camera (pass ball for dynamic framing)
+        this.sceneManager.updateCameraPosition(this.input.playerOffset, this.paddle.group.position, ballState.position);
         
         // Update message timer
         if (this.pointMessageTimer > 0) {
@@ -242,6 +255,48 @@ export class Game {
                 this.pointMessage = '';
                 if (this.onMessage) this.onMessage('');
             }
+        }
+        
+        this.frameCount = (this.frameCount || 0) + 1;
+    }
+    
+    updateDebugUI(ballState, paddlePos, distToBall, justClicked) {
+        // Real-time status
+        const status = this.debugger.getRealTimeStatus(ballState, paddlePos, this.paddle.swingState, distToBall);
+        const debugInfo = document.getElementById('debug-info');
+        if (debugInfo && status) {
+            debugInfo.innerHTML = `
+<span style="color:#0f0">${status.canHit ? '✓ CAN HIT' : '✗ TOO FAR'}</span> | 
+dist: ${status.dist}m | ballZ: ${status.ballZ} | ballY: ${status.ballY}<br>
+swing: ${status.swingState} | clicked: ${justClicked} | lastHit: ${status.lastHitBy}<br>
+Clicks: ${status.sessionClicks} | Hits: ${status.sessionHits} | Auto: ${status.sessionAutoHits} | Miss: ${status.sessionMisses}
+            `.trim();
+        }
+        
+        // Point diagnosis panel
+        const diagPanel = document.getElementById('debug-diagnosis');
+        if (diagPanel) {
+            const diagnosis = this.debugger.getPointDiagnosis();
+            if (diagnosis.length > 0) {
+                diagPanel.innerHTML = '<strong>Point Analysis:</strong><br>' + 
+                    diagnosis.map(d => this.debugger.formatDiagnosis(d)).join('<br><br>');
+                diagPanel.style.display = 'block';
+            } else {
+                diagPanel.style.display = 'none';
+            }
+        }
+        
+        // Session summary
+        const summaryPanel = document.getElementById('debug-summary');
+        if (summaryPanel) {
+            const s = this.debugger.getSessionSummary();
+            summaryPanel.innerHTML = `
+<strong>Session Stats</strong><br>
+Points: ${s.pointsPlayed} | Clicks: ${s.totalClicks}<br>
+Manual Hits: ${s.manualHits} | Auto Hits: ${s.totalAutoHits}<br>
+Hit Rate: <span style="color:${parseInt(s.hitRate) > 50 ? '#4caf50' : '#ff9800'}">${s.hitRate}</span><br>
+Top Miss Reason: ${s.topMissReason}
+            `.trim();
         }
     }
     
@@ -327,43 +382,46 @@ export class Game {
     
     checkPaddleContact() {
         const ballState = this.physics.getBallState();
-        
-        // Check if ball is near paddle - VERY generous for playability
         const paddlePos = this.paddle.getHitPosition();
         const dist = paddlePos.distanceTo(ballState.position);
         
-        if (dist > 0.60) return; // Very generous hit radius
+        if (dist > 0.60) {
+            this.debugger.logMiss(this.frameCount || 0, 'too_far', { dist });
+            return;
+        }
         
-        // Prevent hitting ball twice
-        if (ballState.lastHitBy === 'player') return;
+        if (ballState.lastHitBy === 'player') {
+            this.debugger.logMiss(this.frameCount || 0, 'already_hit', { lastHitBy: ballState.lastHitBy });
+            return;
+        }
         
         this.paddle.markHit();
-        this.processPaddleHit(ballState, paddlePos);
+        this.processPaddleHit(ballState, paddlePos, dist);
     }
     
-    processPaddleHit(ballState, paddlePos) {
-        // Calculate hit quality based on timing and position
+    processPaddleHit(ballState, paddlePos, dist) {
         const sweetSpotDist = Math.sqrt(
             (ballState.position.x - paddlePos.x) ** 2 +
             (ballState.position.y - paddlePos.y) ** 2
         );
         const hitQuality = Math.max(0.3, 1.0 - sweetSpotDist * 3);
         
-        // Get equipment properties
-        const props = this.equipment.getPaddleProperties();
+        // Check if this was an auto-hit (no recent manual click)
+        const recentClicks = this.debugger.session.clicks.slice(-3);
+        const wasAuto = recentClicks.length === 0 || 
+            (performance.now() - recentClicks[recentClicks.length - 1].time) > 500;
         
-        // Calculate hit
+        this.debugger.logHit(this.frameCount || 0, ballState, paddlePos, hitQuality, wasAuto);
+        
+        const props = this.equipment.getPaddleProperties();
         const paddleNormal = this.paddle.getPaddleNormal();
         const paddleVel = this.paddle.getPaddleVelocity();
-        
-        // Player input affects shot direction
         const aimX = this.input.mouse.x * 0.5;
         
-        // Add player-controlled spin based on paddle angle
         const playerSpin = new THREE.Vector3(
-            -this.input.paddleAngle * 50, // topspin/backspin
+            -this.input.paddleAngle * 50,
             0,
-            this.input.mouse.x * 20 // sidespin
+            this.input.mouse.x * 20
         );
         
         const result = this.physics.calculateHit(
@@ -377,30 +435,22 @@ export class Game {
             hitQuality
         );
         
-        // Blend aim direction with physics result
         const speed = result.velocity.length();
         const aimFactor = 0.35;
         result.velocity.x = result.velocity.x * (1 - aimFactor) + aimX * speed * aimFactor;
         result.velocity.y = Math.max(0.25, result.velocity.y);
-        // z stays as calculated by physics for realistic forward speed
         
-        // Add player spin input
         result.spin.add(playerSpin);
         
-        // Apply
         this.physics.ball.hit(result.velocity, result.spin, 'player');
         
-        // Visual and audio feedback
         const hitIntensity = result.velocity.length() / 8;
         this.effects.spawnHitParticles(ballState.position, hitIntensity);
         this.audio.playHit(hitIntensity);
         
-        // Determine shot type
         this.identifyShot(result.velocity, result.spin, 'player');
-        
         this.rallyShotCount++;
         
-        // If was serving, transition to rally
         if (this.state === GameState.SERVING) {
             this.setState(GameState.RALLY);
         }
@@ -519,6 +569,9 @@ export class Game {
             }
         }
         
+        // End debugger point tracking
+        this.debugger.endPoint(winner, this.score);
+        
         // Switch server
         this.servesRemaining--;
         if (this.servesRemaining <= 0) {
@@ -543,6 +596,7 @@ export class Game {
             if (this.state === GameState.POINT_END) {
                 this.resetBall();
                 this.setState(GameState.SERVING);
+                this.debugger.startPoint();
             }
         }, 1500);
     }
