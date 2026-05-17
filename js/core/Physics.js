@@ -276,8 +276,10 @@ export class PhysicsEngine {
         const normalVel = paddleNormal.clone().multiplyScalar(relVel.dot(paddleNormal));
         const tangentialVel = relVel.clone().sub(normalVel);
         
-        // Outgoing normal velocity (reflection + paddle speed)
-        const outNormal = paddleNormal.clone().multiplyScalar(-normalVel.length() * restitution);
+        // Outgoing normal velocity: reflect incoming normal component, then add paddle thrust.
+        // normalVel already points along the projection of relVel on the paddle normal;
+        // multiplying by -restitution gives the elastic rebound in the correct direction.
+        const outNormal = normalVel.clone().multiplyScalar(-restitution);
         outNormal.add(paddleVel.clone().multiplyScalar(0.5 + bladeSpeed * 0.5));
         
         // Tangential component - affected by friction and spin

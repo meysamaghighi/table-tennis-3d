@@ -9,6 +9,7 @@ import { Equipment } from './Equipment.js';
 import { EffectsManager } from '../three/Effects.js';
 import { AudioManager } from './Audio.js';
 import { GameDebugger } from './Debugger.js';
+import { AutoTune } from './AutoTune.js';
 
 const WINNING_SCORE = 11;
 const SERVE_CHANGE_INTERVAL = 2;
@@ -35,6 +36,8 @@ export class Game {
         this.physics = new PhysicsEngine();
         this.equipment = new Equipment();
         this.debugger = new GameDebugger();
+        this.autoTune = new AutoTune();
+        this._lastEndReason = null;
         
         this.state = GameState.MENU;
         this.score = { player: 0, opponent: 0 };
@@ -106,9 +109,10 @@ export class Game {
         this.rallyShotCount = 0;
         
         if (this.server === 'player') {
-            this.physics.ball.position.set(0, 1.3, 0.8);
+            // Toss near the player's end of the table so the resting paddle (z ~ 1.70) can reach it.
+            this.physics.ball.position.set(0, 1.3, 1.45);
         } else {
-            this.physics.ball.position.set(0, 1.3, -0.8);
+            this.physics.ball.position.set(0, 1.3, -1.0);
         }
         
         // Update mesh immediately to prevent position flash
@@ -123,7 +127,7 @@ export class Game {
     tossBall() {
         if (!this.ballToss.active && this.state === GameState.SERVING && this.server === 'player') {
             this.ballToss.active = true;
-            this.physics.ball.position.set(0, 1.2, 0.8);
+            this.physics.ball.position.set(0, 1.2, 1.45);
             this.ballToss.velocity.set(
                 (Math.random() - 0.5) * 0.2,
                 2.4,
@@ -172,25 +176,27 @@ export class Game {
             );
         }
         
-        // DEBUG: log all clicks
-        if (justClicked) {
-        }
-        
-        // Player serve: click to auto-toss then hit
+        // Player serve: a click/tap kicks off the toss; from there auto-hit handles it.
         if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
             if (justClicked) {
                 this.tossBall();
             }
         }
-        
-        // INSTANT HIT: when player clicks, check distance and hit immediately
-        if ((this.state === GameState.SERVING || this.state === GameState.RALLY) && ballState.active) {
-            if (justClicked) {
-                this.paddle.triggerSwing();
-                // Hit immediately if ball is within generous range
-                if (distToBall < 0.70 && ballState.lastHitBy !== 'player') {
-                    this.processPaddleHit(ballState, paddlePos, distToBall);
-                }
+
+        // AUTO-HIT: no click required. The paddle swings on its own whenever the
+        // ball enters the hit window. Works for both rallies and serves.
+        if (ballState.active && ballState.lastHitBy !== 'player'
+            && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
+
+            const serveReady = this.state === GameState.SERVING
+                && this.ballToss.active
+                && ballState.velocity.y < 0.5;            // ball has reached its peak / is falling
+            const rallyReady = this.state === GameState.RALLY
+                && ballState.velocity.z > 0;              // ball moving toward player
+
+            if ((serveReady || rallyReady) && distToBall < 0.45) {
+                if (this.paddle.swingState === 'ready') this.paddle.triggerSwing();
+                this.processPaddleHit(ballState, paddlePos, distToBall);
             }
         }
         
@@ -215,23 +221,12 @@ export class Game {
         this.debugger.logBallState(this.frameCount || 0, ballState);
         this.debugger.logPaddleState(this.frameCount || 0, paddlePos);
         
-        // Show CLICK prompt when ball is very close
-        const clickPrompt = document.getElementById('click-prompt');
-        if (clickPrompt) {
-            if (canHitBall && distToBall < 0.45) {
-                clickPrompt.style.opacity = '1';
-                clickPrompt.style.transform = 'translate(-50%, -50%) scale(1)';
-            } else {
-                clickPrompt.style.opacity = '0';
-                clickPrompt.style.transform = 'translate(-50%, -50%) scale(0.8)';
-            }
-        }
-        
         // Update debug UI
         this.updateDebugUI(ballState, paddlePos, distToBall, justClicked, this.input);
         
-        // Update paddle position
-        this.paddle.update(this.input, dt, ballState.position, ballState.active, canHitBall);
+        // Sync auto-tuned opponent difficulty, then update paddle.
+        this.opponent.setDifficulty(this.autoTune.get('opponentDifficulty'));
+        this.paddle.update(this.input, dt, ballState, canHitBall, this.autoTune);
         
         // Update effects
         this.effects.update(dt);
@@ -326,13 +321,14 @@ Top Miss Reason: ${s.topMissReason}
     handleBounce(event) {
         this.lastBounceSide = event.side;
         this.bouncePositions.push(event.position.clone());
-        
+
         // Check serve rules
         if (this.state === GameState.SERVING) {
             this.serveBounceCount++;
-            
+
             // Ball cannot bounce before being struck during serve
             if (this.physics.ball.lastHitBy === null) {
+                this._lastEndReason = 'fault';
                 this.endPoint('fault');
                 return;
             }
@@ -352,6 +348,8 @@ Top Miss Reason: ${s.topMissReason}
                     
                     if (side1 === side2) {
                         // Double bounce - point to other player
+                        this._lastEndReason = 'double_bounce';
+                        this._lastHitByAtEnd = this.physics.ball.lastHitBy;
                         if (side1 === 'player') {
                             this.scorePoint('opponent');
                         } else {
@@ -367,14 +365,14 @@ Top Miss Reason: ${s.topMissReason}
     handleFloorBounce() {
         // Ball hit the floor outside table
         const ballState = this.physics.getBallState();
-        
-        // Determine who gets the point
+        this._lastEndReason = 'floor';
+        this._lastHitByAtEnd = ballState.lastHitBy;
+
         if (ballState.lastHitBy === 'player') {
             this.scorePoint('opponent');
         } else if (ballState.lastHitBy === 'opponent') {
             this.scorePoint('player');
         } else {
-            // No one hit it - fault on server
             this.scorePoint(this.server === 'player' ? 'opponent' : 'player');
         }
     }
@@ -405,52 +403,57 @@ Top Miss Reason: ${s.topMissReason}
             (ballState.position.y - paddlePos.y) ** 2
         );
         const hitQuality = Math.max(0.3, 1.0 - sweetSpotDist * 3);
-        
-        // Check if this was an auto-hit (no recent manual click)
+
+        // Was this an auto-hit (no recent manual click)?
         const recentClicks = this.debugger.session.clicks.slice(-3);
-        const wasAuto = recentClicks.length === 0 || 
+        const wasAuto = recentClicks.length === 0 ||
             (performance.now() - recentClicks[recentClicks.length - 1].time) > 500;
-        
         this.debugger.logHit(this.frameCount || 0, ballState, paddlePos, hitQuality, wasAuto);
-        
-        const props = this.equipment.getPaddleProperties();
+
+        const props        = this.equipment.getPaddleProperties();
         const paddleNormal = this.paddle.getPaddleNormal();
-        const paddleVel = this.paddle.getPaddleVelocity();
-        const aimX = this.input.mouse.x * 0.5;
-        
-        const playerSpin = new THREE.Vector3(
-            -this.input.paddleAngle * 50,
-            0,
-            this.input.mouse.x * 20
-        );
-        
+
+        // Per-shot power: pro players don't swing the same way at every ball.
+        // Scale the swing magnitude by ball height + incoming speed so high
+        // balls get smashed, low pushes stay soft, and fast incoming gets blocked.
+        const baseThrust    = this.autoTune.get('paddleThrust');
+        const heightAbove   = ballState.position.y - 0.76;        // TABLE_HEIGHT
+        const incomingSpeed = ballState.velocity.length();
+        let thrustMul = 1.0;
+        if (heightAbove > 0.25)        thrustMul = 1.30;          // smash
+        else if (heightAbove < 0.06)   thrustMul = 0.70;          // soft push
+        if (incomingSpeed > 6.0)       thrustMul *= 0.80;         // block fast incoming
+        const paddleVel = new THREE.Vector3(0, 0, -baseThrust * thrustMul);
+
         const result = this.physics.calculateHit(
-            ballState.position,
-            ballState.velocity,
-            ballState.spin,
-            paddlePos,
-            paddleVel,
-            paddleNormal,
-            props,
-            hitQuality
+            ballState.position, ballState.velocity, ballState.spin,
+            paddlePos, paddleVel, paddleNormal,
+            props, hitQuality
         );
-        
-        const speed = result.velocity.length();
-        const aimFactor = 0.35;
-        result.velocity.x = result.velocity.x * (1 - aimFactor) + aimX * speed * aimFactor;
-        result.velocity.y = Math.max(0.25, result.velocity.y);
-        
-        result.spin.add(playerSpin);
-        
+
+        const speed     = result.velocity.length();
+        const aimAssist = this.autoTune.get('aimAssist');
+        const shotArc   = this.autoTune.get('shotArc');
+        const aimX      = this.input.mouse.x * 0.5;
+
+        // Direction assist: blend outgoing velocity toward a sensible target on
+        // the opponent's court — straight ahead with mouse-controlled lateral bias.
+        if (aimAssist > 0 && speed > 0.1) {
+            const target = new THREE.Vector3(aimX, 0.18, -1).normalize().multiplyScalar(speed);
+            result.velocity.lerp(target, aimAssist);
+        }
+        // Net-clearance arc (auto-tuned). No more hard `Math.max(0.25, y)` clamp.
+        result.velocity.y += shotArc;
+
         this.physics.ball.hit(result.velocity, result.spin, 'player');
-        
+
         const hitIntensity = result.velocity.length() / 8;
         this.effects.spawnHitParticles(ballState.position, hitIntensity);
         this.audio.playHit(hitIntensity);
-        
+
         this.identifyShot(result.velocity, result.spin, 'player');
         this.rallyShotCount++;
-        
+
         if (this.state === GameState.SERVING) {
             this.setState(GameState.RALLY);
         }
@@ -554,7 +557,17 @@ Top Miss Reason: ${s.topMissReason}
         // Deactivate ball immediately
         this.physics.ball.active = false;
         this.ballMesh.setVisible(false);
-        
+
+        // Feed the auto-tuner with this point's outcome BEFORE we mutate state.
+        this.autoTune.observePoint({
+            winner,
+            reason: this._lastEndReason || 'other',
+            lastHitBy: this._lastHitByAtEnd || this.physics.ball.lastHitBy,
+            rallyShots: this.rallyShotCount,
+        });
+        this._lastEndReason = null;
+        this._lastHitByAtEnd = null;
+
         this.score[winner]++;
         
         if (this.onScoreChange) {
@@ -603,8 +616,10 @@ Top Miss Reason: ${s.topMissReason}
     
     endPoint(reason) {
         const ballState = this.physics.getBallState();
+        this._lastEndReason = reason;
+        this._lastHitByAtEnd = ballState.lastHitBy;
         let winner = '';
-        
+
         switch (reason) {
             case 'net':
                 if (ballState.lastHitBy === 'player') winner = 'opponent';
@@ -622,7 +637,7 @@ Top Miss Reason: ${s.topMissReason}
                 this.showMessage('Out!');
                 break;
         }
-        
+
         if (winner) {
             this.scorePoint(winner);
         }

@@ -69,23 +69,15 @@ class App {
     }
     
     setupMobileControls() {
+        // Auto-swing means there's nothing to "swing" manually anymore — hide
+        // the SWING button on phone/tablet. Click-prompt is also gone.
         const swingBtn = document.getElementById('btn-mobile-swing');
+        if (swingBtn) swingBtn.style.display = 'none';
+        const clickPrompt = document.getElementById('click-prompt');
+        if (clickPrompt) clickPrompt.style.display = 'none';
+
         const tossBtn = document.getElementById('btn-mobile-toss');
         const pauseBtn = document.getElementById('btn-mobile-pause');
-        const angleUpBtn = document.getElementById('btn-angle-up');
-        const angleDownBtn = document.getElementById('btn-angle-down');
-        
-        if (swingBtn) {
-            swingBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.input.triggerSwing();
-            }, { passive: false });
-            // Also support click for hybrid devices
-            swingBtn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                this.input.triggerSwing();
-            });
-        }
         
         if (tossBtn) {
             tossBtn.addEventListener('touchstart', (e) => {
@@ -113,27 +105,9 @@ class App {
             });
         }
         
-        if (angleUpBtn) {
-            angleUpBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.input.paddleAngleTarget = Math.min(0.8, this.input.paddleAngleTarget + 0.15);
-            }, { passive: false });
-            angleUpBtn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                this.input.paddleAngleTarget = Math.min(0.8, this.input.paddleAngleTarget + 0.15);
-            });
-        }
-        
-        if (angleDownBtn) {
-            angleDownBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.input.paddleAngleTarget = Math.max(-0.8, this.input.paddleAngleTarget - 0.15);
-            }, { passive: false });
-            angleDownBtn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                this.input.paddleAngleTarget = Math.max(-0.8, this.input.paddleAngleTarget - 0.15);
-            });
-        }
+        // Paddle angle is now auto-determined from ball/swing state; no manual control.
+        const angleControls = document.querySelector('.mobile-angle-controls');
+        if (angleControls) angleControls.style.display = 'none';
     }
     
     setupPointerLock() {

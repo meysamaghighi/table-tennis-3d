@@ -13,10 +13,13 @@ export class SceneManager {
             antialias: true,
             powerPreference: 'high-performance'
         });
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        // Mobile GPUs choke on full DPR + soft shadows. Cap both on touch devices.
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2));
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.shadowMap.type = isTouch ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+        this._isTouch = isTouch;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.2;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -51,8 +54,9 @@ export class SceneManager {
         const mainLight = new THREE.DirectionalLight(0xfff5e6, 1.5);
         mainLight.position.set(0, 5, 1);
         mainLight.castShadow = true;
-        mainLight.shadow.mapSize.width = 2048;
-        mainLight.shadow.mapSize.height = 2048;
+        const shadowRes = this._isTouch ? 1024 : 2048;
+        mainLight.shadow.mapSize.width = shadowRes;
+        mainLight.shadow.mapSize.height = shadowRes;
         mainLight.shadow.camera.near = 0.5;
         mainLight.shadow.camera.far = 12;
         mainLight.shadow.camera.left = -4;

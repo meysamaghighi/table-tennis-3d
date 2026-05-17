@@ -1,1 +1,7 @@
 .vercel
+.venv/
+*.mov
+*.m4v
+*.webm
+test_videos/
+user_videos/

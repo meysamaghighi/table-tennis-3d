@@ -216,14 +216,21 @@ export class UIManager {
             if (newState === 'paused') {
                 this.showOverlay('pause');
             }
-            
+
             if (newState === 'game_over') {
                 const winner = this.game.getWinner();
-                document.getElementById('game-result').textContent = 
+                document.getElementById('game-result').textContent =
                     winner === 'player' ? 'Victory!' : 'Defeat';
-                document.getElementById('final-score').textContent = 
+                document.getElementById('final-score').textContent =
                     `${this.game.score.player} - ${this.game.score.opponent}`;
                 this.showOverlay('gameOver');
+            }
+
+            // Toss button only relevant while the player is waiting to serve.
+            const tossBtn = document.getElementById('btn-mobile-toss');
+            if (tossBtn) {
+                const playerServing = (newState === 'serving' && this.game.server === 'player');
+                tossBtn.classList.toggle('visible', playerServing);
             }
         };
         
@@ -297,12 +304,16 @@ export class UIManager {
     }
     
     update(dt) {
-        // Update power/spin meters based on input
-        const paddleAngle = this.game.input.paddleAngle;
-        const power = Math.abs(paddleAngle) / 0.8 * 50 + 25;
-        const spin = Math.abs(paddleAngle) / 0.8 * 100;
-        
-        document.getElementById('power-fill').style.width = `${Math.min(100, power)}%`;
-        document.getElementById('spin-fill').style.width = `${Math.min(100, spin)}%`;
+        // Meters now visualize the auto-tuned shot profile (so the player can
+        // see the AutoTune system reacting to their results in real time).
+        const t = this.game.autoTune;
+        if (!t) return;
+        const thrust = t.get('paddleThrust');   // 2.2 .. 5.0
+        const arc    = t.get('shotArc');        // 0.30 .. 0.90
+        const power  = ((thrust - 2.2) / (5.0 - 2.2)) * 100;
+        const spin   = ((arc    - 0.30) / (0.90 - 0.30)) * 100;
+
+        document.getElementById('power-fill').style.width = `${Math.max(0, Math.min(100, power))}%`;
+        document.getElementById('spin-fill').style.width  = `${Math.max(0, Math.min(100, spin))}%`;
     }
 }

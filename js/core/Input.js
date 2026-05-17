@@ -10,12 +10,8 @@ export class InputManager {
         this.isMouseDown = false;
         this.wasMouseDown = false;
         this.clicked = false;
-        this.scrollDelta = 0;
         this.keys = {};
-        
-        this.paddleAngle = 0;
-        this.paddleAngleTarget = 0;
-        
+
         this.playerOffset = { x: 0, z: 0 };
         
         this._callbacks = {};
@@ -74,14 +70,6 @@ export class InputManager {
         
         this._boundHandlers.mouseup = (e) => {
             if (e.button === 0) this.isMouseDown = false;
-        };
-        
-        // Scroll for paddle angle
-        this._boundHandlers.wheel = (e) => {
-            e.preventDefault();
-            this.scrollDelta += e.deltaY;
-            this.paddleAngleTarget += e.deltaY * 0.001;
-            this.paddleAngleTarget = Math.max(-0.8, Math.min(0.8, this.paddleAngleTarget));
         };
         
         // Keyboard
@@ -156,7 +144,6 @@ export class InputManager {
         window.addEventListener('mousemove', this._boundHandlers.mousemove);
         window.addEventListener('mousedown', this._boundHandlers.mousedown);
         window.addEventListener('mouseup', this._boundHandlers.mouseup);
-        window.addEventListener('wheel', this._boundHandlers.wheel, { passive: false });
         window.addEventListener('keydown', this._boundHandlers.keydown);
         window.addEventListener('keyup', this._boundHandlers.keyup);
     }
@@ -169,9 +156,6 @@ export class InputManager {
     }
     
     update(dt) {
-        // Smooth paddle angle
-        this.paddleAngle += (this.paddleAngleTarget - this.paddleAngle) * 8 * dt;
-        
         // Player movement (WASD)
         if (!this.isTouch) {
             const moveSpeed = 2.0 * dt;
@@ -186,7 +170,6 @@ export class InputManager {
         
         this.mouse.dx = 0;
         this.mouse.dy = 0;
-        this.scrollDelta = 0;
         this.clicked = false;
         this.wasMouseDown = this.isMouseDown;
     }
@@ -219,7 +202,6 @@ export class InputManager {
         window.removeEventListener('mousemove', this._boundHandlers.mousemove);
         window.removeEventListener('mousedown', this._boundHandlers.mousedown);
         window.removeEventListener('mouseup', this._boundHandlers.mouseup);
-        window.removeEventListener('wheel', this._boundHandlers.wheel);
         window.removeEventListener('keydown', this._boundHandlers.keydown);
         window.removeEventListener('keyup', this._boundHandlers.keyup);
         

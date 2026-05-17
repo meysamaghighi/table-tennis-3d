@@ -3,6 +3,7 @@
  */
 
 import * as THREE from 'three';
+import { TABLE_HEIGHT, TABLE_LENGTH } from '../core/Physics.js';
 
 export class PaddleMesh {
     constructor(scene) {
@@ -140,7 +141,9 @@ export class PaddleMesh {
             recovery: 0.12,
         };
         
-        this.basePosition = new THREE.Vector3(0, 1.0, 0.92);
+        // Resting paddle position sits BEHIND the player's end line
+        // (TABLE_LENGTH/2 = 1.37) so it never clips through the table surface.
+        this.basePosition = new THREE.Vector3(0, 1.0, 1.70);
         this.hasHitThisSwing = false;
         
         // Hit zone indicator
@@ -161,73 +164,112 @@ export class PaddleMesh {
         this.rubberBack.material.color.set(color);
     }
     
-    update(input, dt, ballPosition, ballActive, canHitBall) {
+    update(input, dt, ballState, canHitBall, autoTune) {
+        const ballPosition = ballState.position;
+        const ballVelocity = ballState.velocity;
+        const ballActive = ballState.active;
+
         const reachX = 0.9;
-        const reachY = 0.5;
-        const baseZ = 0.92 + input.playerOffset.z * 0.2;
-        
-        // Use absolute cursor position (most reliable across all devices)
-        // virtualMouse is fallback for relative movement scenarios
+        const reachY = 0.40;
+
+        // Use absolute cursor; fall back to accumulated movement only when meaningful.
         let mouseX = input.mouse.x;
         let mouseY = input.mouse.y;
-        
-        // If virtual mouse has been moved significantly, blend it in
-        if (Math.abs(input.virtualMouseX) > 0.05) {
-            mouseX = input.virtualMouseX;
-        }
-        if (Math.abs(input.virtualMouseY) > 0.05) {
-            mouseY = input.virtualMouseY;
-        }
-        
+        if (Math.abs(input.virtualMouseX) > 0.05) mouseX = input.virtualMouseX;
+        if (Math.abs(input.virtualMouseY) > 0.05) mouseY = input.virtualMouseY;
+
+        // ---- Target position
         let targetX = mouseX * reachX + input.playerOffset.x;
-        let targetY = 0.82 + mouseY * reachY;
-        
-        // Light auto-track (15%) so player still feels control
-        if (ballActive && ballPosition.z > 0 && ballPosition.z < 1.8) {
-            targetX = targetX * 0.85 + ballPosition.x * 0.15;
-            targetY = targetY * 0.85 + ballPosition.y * 0.15;
+        let targetY = 0.95 + mouseY * reachY;
+        // Rest behind the player's end line (TABLE_LENGTH/2 = 1.37). Player W/S nudges it.
+        let targetZ = 1.70 + input.playerOffset.z * 0.2;
+
+        const trackY = (autoTune && autoTune.get('autoTrackY')) || 0.7;
+
+        // Auto-track ball when it's on the player's half (or just past the net).
+        if (ballActive && ballPosition.z > -0.3 && ballPosition.z < 2.3) {
+            // X: player controls placement, ball nudges
+            targetX = targetX * 0.60 + ballPosition.x * 0.40;
+            // Y: mostly automatic so kids don't have to align by hand
+            targetY = targetY * (1 - trackY) + ballPosition.y * trackY;
+
+            // Short-ball reach: paddle comes "on" the table when the ball is short.
+            // Maps ball z in [-0.1 .. 1.2] to forward extension in [0.85 .. 0] m.
+            if (ballPosition.z < 1.25) {
+                const forwardness = Math.max(0, Math.min(1, (1.25 - ballPosition.z) / 1.35));
+                targetZ = targetZ - forwardness * 0.85;
+            }
         }
-        
-        this.basePosition.set(
-            targetX + Math.sin(Date.now() * 0.002) * 0.005,
-            targetY + Math.cos(Date.now() * 0.0015) * 0.003,
-            baseZ
-        );
-        
+
+        // ---- Table-surface constraint
+        // When the paddle is hovering over the table, it must stay above the surface
+        // (allow the head to come close — short pushes ride low — but never inside).
+        const overTable = targetZ < TABLE_LENGTH / 2 + 0.05;
+        const minY = overTable ? TABLE_HEIGHT + 0.025 : 0.55;
+        if (targetY < minY) targetY = minY;
+
+        // ---- Smooth toward target (frame-rate independent damping). No more jumps.
+        const posSmooth = 1 - Math.exp(-14 * dt);
+        this.basePosition.x += (targetX - this.basePosition.x) * posSmooth;
+        this.basePosition.y += (targetY - this.basePosition.y) * posSmooth;
+        this.basePosition.z += (targetZ - this.basePosition.z) * posSmooth;
+
+        // ---- Automatic paddle orientation (no more scroll-wheel angle).
+        // Pro heuristic: face follows the ball — closed face for descending/high
+        // balls (drive down), open face for low/ascending balls (lift).
+        let autoPitch = 0;
+        let autoYaw   = -mouseX * 0.22;
+
+        if (ballActive && ballPosition.z > -0.6 && ballPosition.z < 2.3) {
+            const heightDiff = ballPosition.y - this.basePosition.y;     // + ball above paddle
+            autoPitch = heightDiff * 0.9;                                // tilt face toward the ball
+            if (ballVelocity.y < -0.5) autoPitch += 0.18;                // descending → close face
+            else if (ballVelocity.y > 0.5) autoPitch -= 0.12;            // ascending → open face
+            // Slight yaw adjust toward ball X so face squares up.
+            autoYaw += (ballPosition.x - this.basePosition.x) * 0.20;
+        }
+        autoPitch = Math.max(-0.45, Math.min(0.45, autoPitch));
+        autoYaw   = Math.max(-0.55, Math.min(0.55, autoYaw));
+
+        const rotSmooth = 1 - Math.exp(-10 * dt);
+        this._smPitch = (this._smPitch || 0) + (autoPitch - (this._smPitch || 0)) * rotSmooth;
+        this._smYaw   = (this._smYaw   || 0) + (autoYaw   - (this._smYaw   || 0)) * rotSmooth;
+
+        // ---- Swing animation (transient pose on top of rest pose)
         this.updateSwing(dt);
-        
-        this.group.position.copy(this.basePosition);
-        
-        const paddleAngle = input.paddleAngle;
+
         let swingRotX = 0;
         let swingOffsetZ = 0;
-        
         switch (this.swingState) {
-            case 'backswing':
+            case 'backswing': {
                 const bp = this.swingTimer / this.swingDuration.backswing;
-                swingRotX = -0.3 * bp;
+                swingRotX = -0.30 * bp;
                 swingOffsetZ = 0.08 * bp;
                 break;
-            case 'forward':
+            }
+            case 'forward': {
                 const fp = this.swingTimer / this.swingDuration.forward;
-                swingRotX = -0.3 + 0.6 * fp;
+                swingRotX = -0.30 + 0.60 * fp;
                 swingOffsetZ = 0.08 - 0.25 * fp;
                 break;
-            case 'follow':
+            }
+            case 'follow': {
                 const fop = this.swingTimer / this.swingDuration.follow;
-                swingRotX = 0.3 * (1 - fop);
+                swingRotX = 0.30 * (1 - fop);
                 swingOffsetZ = -0.17 * (1 - fop);
                 break;
+            }
         }
-        
+
+        // Apply
+        this.group.position.copy(this.basePosition);
         this.group.position.z += swingOffsetZ;
         this.group.rotation.set(
-            swingRotX + paddleAngle * 0.5,
-            -mouseX * 0.35,
-            0 - paddleAngle
+            swingRotX + this._smPitch,
+            this._smYaw,
+            0
         );
-        
-        // Hit zone visualization hidden for clean gameplay
+
         this.hitZoneMesh.visible = false;
     }
     
@@ -268,9 +310,10 @@ export class PaddleMesh {
         return new THREE.Vector3(0, 0, -1).applyQuaternion(this.group.quaternion).normalize();
     }
     
-    getPaddleVelocity() {
+    getPaddleVelocity(autoTune) {
         if (this.swingState === 'forward' || this.swingState === 'backswing') {
-            return new THREE.Vector3(0, 0, -3.5);
+            const thrust = (autoTune && autoTune.get('paddleThrust')) || 3.2;
+            return new THREE.Vector3(0, 0, -thrust);
         }
         return new THREE.Vector3(0, 0, 0);
     }
