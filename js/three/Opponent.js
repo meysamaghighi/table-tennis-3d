@@ -91,7 +91,7 @@ export class Opponent {
         }
         
         // Smooth movement toward target
-        const moveSpeed = 2.0 + this.difficulty * 2.0;
+        const moveSpeed = 2.8 + this.difficulty * 2.0;
         this.position.x += (this.targetPosition.x - this.position.x) * moveSpeed * dt;
         this.position.y += (this.targetPosition.y - this.position.y) * moveSpeed * dt;
         this.position.z += (this.targetPosition.z - this.position.z) * moveSpeed * dt;
@@ -134,9 +134,10 @@ export class Opponent {
         const predictedLanding = this.predictLanding(position, velocity, spin);
         
         if (predictedLanding) {
-            // Position to intercept
+            // Position to intercept — step in close behind short landings so
+            // drop shots near the net stay returnable.
             const interceptX = predictedLanding.x;
-            const interceptZ = predictedLanding.z - 0.3;
+            const interceptZ = Math.min(-0.30, predictedLanding.z - 0.25);
             const interceptY = Math.max(0.8, Math.min(1.3, predictedLanding.y + 0.2));
             
             // Add error based on difficulty
@@ -278,7 +279,11 @@ export class Opponent {
     getHitData() {
         // Return velocity and spin for the hit
         const angleX = this.targetX * 0.3;
-        const angleY = 0.2 + Math.random() * 0.3;
+        // Vertical launch angle: hits come from ~0.9m (below net top), so the
+        // return needs real loft to clear. 0.65-0.9 lands on the player's side
+        // across typical contact points/speeds/spins (checked against the
+        // physics engine); the old 0.2-0.5 netted most returns.
+        const angleY = 0.65 + Math.random() * 0.25;
         
         const speed = this.shotPower * (0.7 + Math.random() * 0.3);
         

@@ -56,7 +56,9 @@ export class AutoTune {
         const avgRally     = recent.reduce((s, p) => s + (p.rallyShots || 0), 0) / recent.length;
 
         // Player-side errors (player was the last to touch before ball died)
-        const playerOut    = recent.filter(p => p.reason === 'out'  && p.lastHitBy === 'player').length;
+        // 'floor' = ball flew past the table and hit the ground — same failure
+        // mode as 'out' (sailed long), so tune on both.
+        const playerOut    = recent.filter(p => (p.reason === 'out' || p.reason === 'floor') && p.lastHitBy === 'player').length;
         const playerNet    = recent.filter(p => p.reason === 'net'  && p.lastHitBy === 'player').length;
         const playerFault  = recent.filter(p => p.reason === 'fault'&& p.lastHitBy === 'player').length;
         const playerMissed = recent.filter(p => p.lastHitBy !== 'player' && p.winner === 'opponent').length;

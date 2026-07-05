@@ -190,11 +190,12 @@ export class Game {
 
             const serveReady = this.state === GameState.SERVING
                 && this.ballToss.active
-                && ballState.velocity.y < 0.5;            // ball has reached its peak / is falling
+                && ballState.velocity.y < 0               // ball is falling
+                && ballState.position.y < 1.10;           // let it drop to a hittable height
             const rallyReady = this.state === GameState.RALLY
                 && ballState.velocity.z > 0;              // ball moving toward player
 
-            if ((serveReady || rallyReady) && distToBall < 0.45) {
+            if ((serveReady || rallyReady) && distToBall < 0.55) {
                 if (this.paddle.swingState === 'ready') this.paddle.triggerSwing();
                 this.processPaddleHit(ballState, paddlePos, distToBall);
             }
@@ -332,10 +333,17 @@ Top Miss Reason: ${s.topMissReason}
                 this.endPoint('fault');
                 return;
             }
-            
-            // After second bounce, serve is in play
-            if (this.serveBounceCount >= 2) {
+
+            // Serve is in play once it bounces on the receiver's side —
+            // this is what lets the receiver's auto-hit return it.
+            const receiverSide = this.server === 'player' ? 'opponent' : 'player';
+            if (event.side === receiverSide) {
                 this.setState(GameState.RALLY);
+            } else if (this.serveBounceCount >= 2) {
+                // Two bounces without reaching the receiver = failed serve
+                this._lastEndReason = 'fault';
+                this.endPoint('fault');
+                return;
             }
         } else if (this.state === GameState.RALLY) {
             // In rally, check for double bounce
@@ -423,6 +431,7 @@ Top Miss Reason: ${s.topMissReason}
         if (heightAbove > 0.25)        thrustMul = 1.30;          // smash
         else if (heightAbove < 0.06)   thrustMul = 0.70;          // soft push
         if (incomingSpeed > 6.0)       thrustMul *= 0.80;         // block fast incoming
+        if (this.state === GameState.SERVING) thrustMul = 0.80;   // serves are placed, not smashed
         const paddleVel = new THREE.Vector3(0, 0, -baseThrust * thrustMul);
 
         const result = this.physics.calculateHit(
@@ -436,14 +445,28 @@ Top Miss Reason: ${s.topMissReason}
         const shotArc   = this.autoTune.get('shotArc');
         const aimX      = this.input.mouse.x * 0.5;
 
-        // Direction assist: blend outgoing velocity toward a sensible target on
-        // the opponent's court — straight ahead with mouse-controlled lateral bias.
-        if (aimAssist > 0 && speed > 0.1) {
-            const target = new THREE.Vector3(aimX, 0.18, -1).normalize().multiplyScalar(speed);
-            result.velocity.lerp(target, aimAssist);
+        if (this.state === GameState.SERVING) {
+            // Auto-serve uses a shaped velocity profile instead of raw hit
+            // physics: bounce own side (~z 0.3), clear the net, land short on
+            // the opponent's side (~z -0.3). Range validated against the
+            // physics engine (legal for vy 1.2-1.6 / vz -2.4..-2.8 from the
+            // contact point at y~1.05, z~1.45).
+            const vy = 1.3 + Math.random() * 0.3;
+            const vz = -2.5 - Math.random() * 0.3;
+            result.velocity.set(aimX * 0.8, vy, vz);
+            // Light backspin only — Magnus from the raw hit spin (topspin,
+            // ~80 rad/s) dives this trajectory straight into the net.
+            result.spin.set(10 + Math.random() * 15, 0, 0);
+        } else {
+            // Direction assist: blend outgoing velocity toward a sensible target on
+            // the opponent's court — straight ahead with mouse-controlled lateral bias.
+            if (aimAssist > 0 && speed > 0.1) {
+                const target = new THREE.Vector3(aimX, 0.18, -1).normalize().multiplyScalar(speed);
+                result.velocity.lerp(target, aimAssist);
+            }
+            // Net-clearance arc (auto-tuned). No more hard `Math.max(0.25, y)` clamp.
+            result.velocity.y += shotArc;
         }
-        // Net-clearance arc (auto-tuned). No more hard `Math.max(0.25, y)` clamp.
-        result.velocity.y += shotArc;
 
         this.physics.ball.hit(result.velocity, result.spin, 'player');
 

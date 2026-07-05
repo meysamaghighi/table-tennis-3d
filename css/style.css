@@ -762,6 +762,15 @@ body.touch-device #mobile-controls {
     justify-content: space-between;
 }
 
+/* On touch layouts the pause button lives bottom-right where the meters sit —
+   lift the meters above the button row and slim them down. */
+body.touch-device #power-meter { bottom: 150px; }
+body.touch-device #spin-meter { bottom: 116px; }
+body.touch-device #power-meter, body.touch-device #spin-meter {
+    right: 20px;
+    width: 110px;
+}
+
 .mobile-btn {
     pointer-events: auto;
     background: rgba(255, 107, 53, 0.85);

@@ -188,16 +188,20 @@ export class PaddleMesh {
 
         // Auto-track ball when it's on the player's half (or just past the net).
         if (ballActive && ballPosition.z > -0.3 && ballPosition.z < 2.3) {
-            // X: player controls placement, ball nudges
-            targetX = targetX * 0.60 + ballPosition.x * 0.40;
+            // X: player input steers, ball pulls. When the cursor/finger is
+            // idle (near center) follow the ball hard so wide balls stay
+            // reachable on tap-only play; deliberate input takes over.
+            const ballWeightX = 0.40 + 0.35 * (1 - Math.min(1, Math.abs(mouseX) * 2));
+            targetX = targetX * (1 - ballWeightX) + ballPosition.x * ballWeightX;
             // Y: mostly automatic so kids don't have to align by hand
             targetY = targetY * (1 - trackY) + ballPosition.y * trackY;
 
             // Short-ball reach: paddle comes "on" the table when the ball is short.
-            // Maps ball z in [-0.1 .. 1.2] to forward extension in [0.85 .. 0] m.
+            // Maps ball z in [-0.1 .. 1.2] to forward extension in [1.15 .. 0] m
+            // so balls dying just past the net stay reachable.
             if (ballPosition.z < 1.25) {
                 const forwardness = Math.max(0, Math.min(1, (1.25 - ballPosition.z) / 1.35));
-                targetZ = targetZ - forwardness * 0.85;
+                targetZ = targetZ - forwardness * 1.15;
             }
         }
 
