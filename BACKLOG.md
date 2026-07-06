@@ -1,5 +1,11 @@
 # Backlog — Pro-Level Gameplay
 
+> **⭑ ACTIVE PLAN (2026-07-06): [PLAN-FURY-REMAKE.md](PLAN-FURY-REMAKE.md)** — approved
+> direction: Ping-Pong-Fury-style swipe controls, target-solver shots, AI v2, portrait
+> camera, juice, race-to-5 pacing. 7 phases sized for one Opus/Sonnet session each, with
+> execution protocol. It **supersedes** the P0 items below (auto-hit decisions, swing
+> animation) and the P1 "Mobile UX: aim feels indirect" item — do the plan first.
+
 Current gameplay quality: **~2/10**. The mechanical scaffolding is in place
 (auto-swing, physics, AutoTune, paddle orientation), but the *feel* and the
 *decisions* on both sides are far from pro-level. The items below are the
