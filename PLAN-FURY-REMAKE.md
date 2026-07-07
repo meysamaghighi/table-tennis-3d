@@ -140,7 +140,7 @@ tuning step with Opus rather than iterating blind.
 
 ## Phase status
 - [x] Phase 1 — SwipeInput + paddle tracking
-- [ ] Phase 2 — Shot solver
+- [x] Phase 2 — Shot solver
 - [ ] Phase 3 — Swipe-to-hit + serve
 - [ ] Phase 4 — AI opponent v2
 - [ ] Phase 5 — Portrait camera
