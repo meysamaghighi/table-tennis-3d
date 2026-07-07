@@ -8,6 +8,7 @@ import { BallMesh } from './three/Ball.js';
 import { PaddleMesh } from './three/Paddle.js';
 import { Opponent } from './three/Opponent.js';
 import { InputManager } from './core/Input.js';
+import { SwipeInput } from './core/SwipeInput.js';
 import { Game } from './core/Game.js';
 import { UIManager } from './ui/Menu.js';
 
@@ -29,6 +30,7 @@ class App {
             
             // Core systems
             this.input = new InputManager();
+            this.swipeInput = new SwipeInput(this.canvas);
             this.sceneManager = new SceneManager(this.canvas);
             
             // 3D objects
@@ -43,7 +45,8 @@ class App {
                 this.paddle,
                 this.opponent,
                 this.ballMesh,
-                this.input
+                this.input,
+                this.swipeInput
             );
             
             // UI
@@ -138,6 +141,7 @@ class App {
     dispose() {
         this.isRunning = false;
         this.input.dispose();
+        this.swipeInput.dispose();
         this.sceneManager.dispose();
         this.paddle.dispose();
         this.opponent.dispose();

@@ -139,7 +139,7 @@ tuning step with Opus rather than iterating blind.
    (deploy preview: `vercel`, or prod: `vercel --prod`).
 
 ## Phase status
-- [ ] Phase 1 — SwipeInput + paddle tracking
+- [x] Phase 1 — SwipeInput + paddle tracking
 - [ ] Phase 2 — Shot solver
 - [ ] Phase 3 — Swipe-to-hit + serve
 - [ ] Phase 4 — AI opponent v2

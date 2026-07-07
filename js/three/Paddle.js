@@ -164,46 +164,30 @@ export class PaddleMesh {
         this.rubberBack.material.color.set(color);
     }
     
-    update(input, dt, ballState, canHitBall, autoTune) {
+    update(input, swipeInput, dt, ballState, canHitBall, autoTune) {
         const ballPosition = ballState.position;
         const ballVelocity = ballState.velocity;
         const ballActive = ballState.active;
 
-        const reachX = 0.9;
-        const reachY = 0.40;
+        // ---- Finger/mouse → table-space mapping (control zone: lower ~45%
+        // of the screen). The paddle tracks the pointer 1:1 — no ball-follow
+        // or auto-track blending. `swipeInput.position.x` is -1..1 across
+        // the full screen width; `.y` is 0 (pushed up, reaching over the
+        // table) .. 1 (resting near the player) within the control zone.
+        const reachX = 0.75;
+        const minHeight = 0.78;
+        const maxHeight = 1.35;
+        const maxForwardReach = 1.15;
 
-        // Use absolute cursor; fall back to accumulated movement only when meaningful.
-        let mouseX = input.mouse.x;
-        let mouseY = input.mouse.y;
-        if (Math.abs(input.virtualMouseX) > 0.05) mouseX = input.virtualMouseX;
-        if (Math.abs(input.virtualMouseY) > 0.05) mouseY = input.virtualMouseY;
+        const sx = swipeInput.position.x;
+        const sy = swipeInput.position.y;
 
-        // ---- Target position
-        let targetX = mouseX * reachX + input.playerOffset.x;
-        let targetY = 0.95 + mouseY * reachY;
-        // Rest behind the player's end line (TABLE_LENGTH/2 = 1.37). Player W/S nudges it.
-        let targetZ = 1.70 + input.playerOffset.z * 0.2;
-
-        const trackY = (autoTune && autoTune.get('autoTrackY')) || 0.7;
-
-        // Auto-track ball when it's on the player's half (or just past the net).
-        if (ballActive && ballPosition.z > -0.3 && ballPosition.z < 2.3) {
-            // X: player input steers, ball pulls. When the cursor/finger is
-            // idle (near center) follow the ball hard so wide balls stay
-            // reachable on tap-only play; deliberate input takes over.
-            const ballWeightX = 0.40 + 0.35 * (1 - Math.min(1, Math.abs(mouseX) * 2));
-            targetX = targetX * (1 - ballWeightX) + ballPosition.x * ballWeightX;
-            // Y: mostly automatic so kids don't have to align by hand
-            targetY = targetY * (1 - trackY) + ballPosition.y * trackY;
-
-            // Short-ball reach: paddle comes "on" the table when the ball is short.
-            // Maps ball z in [-0.1 .. 1.2] to forward extension in [1.15 .. 0] m
-            // so balls dying just past the net stay reachable.
-            if (ballPosition.z < 1.25) {
-                const forwardness = Math.max(0, Math.min(1, (1.25 - ballPosition.z) / 1.35));
-                targetZ = targetZ - forwardness * 1.15;
-            }
-        }
+        let targetX = sx * reachX;
+        let targetY = minHeight + sy * (maxHeight - minHeight);
+        // Rest behind the player's end line (TABLE_LENGTH/2 = 1.37); dragging
+        // up shortens that offset so the paddle reaches over the table.
+        // Player W/S still nudges the rest depth.
+        let targetZ = 1.70 + input.playerOffset.z * 0.2 - (1 - sy) * maxForwardReach;
 
         // ---- Table-surface constraint
         // When the paddle is hovering over the table, it must stay above the surface
@@ -212,17 +196,14 @@ export class PaddleMesh {
         const minY = overTable ? TABLE_HEIGHT + 0.025 : 0.55;
         if (targetY < minY) targetY = minY;
 
-        // ---- Smooth toward target (frame-rate independent damping). No more jumps.
-        const posSmooth = 1 - Math.exp(-14 * dt);
-        this.basePosition.x += (targetX - this.basePosition.x) * posSmooth;
-        this.basePosition.y += (targetY - this.basePosition.y) * posSmooth;
-        this.basePosition.z += (targetZ - this.basePosition.z) * posSmooth;
+        // ---- Apply directly: finger drives the paddle 1:1, no lag.
+        this.basePosition.set(targetX, targetY, targetZ);
 
         // ---- Automatic paddle orientation (no more scroll-wheel angle).
         // Pro heuristic: face follows the ball — closed face for descending/high
         // balls (drive down), open face for low/ascending balls (lift).
         let autoPitch = 0;
-        let autoYaw   = -mouseX * 0.22;
+        let autoYaw   = -sx * 0.22;
 
         if (ballActive && ballPosition.z > -0.6 && ballPosition.z < 2.3) {
             const heightDiff = ballPosition.y - this.basePosition.y;     // + ball above paddle

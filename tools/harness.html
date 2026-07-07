@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Fury Remake — Verification Harness</title>
+<style>
+  body { background:#111; color:#eee; font-family: monospace; padding: 16px; }
+  #frame-wrap { display:inline-block; border:2px solid #444; vertical-align: top; }
+  iframe { width:390px; height:720px; border:0; display:block; }
+  #log { white-space: pre-wrap; margin-top: 16px; max-width: 700px; display: inline-block; vertical-align: top; margin-left: 24px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ff5252; }
+</style>
+</head>
+<body>
+<h2>Phase 1 Harness — SwipeInput + Paddle Tracking</h2>
+<div id="frame-wrap"><iframe id="game-frame" src="/index.html"></iframe></div>
+<div id="log">Loading…</div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  const lines = [];
+  let failCount = 0;
+  function log(msg, cls) {
+    lines.push(cls ? `<span class="${cls}">${msg}</span>` : msg);
+    logEl.innerHTML = lines.join('\n');
+    console.log(msg);
+  }
+  function assert(cond, msg) {
+    if (cond) { log(`PASS  ${msg}`, 'pass'); }
+    else { log(`FAIL  ${msg}`, 'fail'); failCount++; }
+  }
+  function approx(a, b, eps) { return Math.abs(a - b) <= eps; }
+
+  const iframe = document.getElementById('game-frame');
+
+  function waitFor(fn, timeoutMs = 8000, intervalMs = 50) {
+    return new Promise((resolve, reject) => {
+      const start = performance.now();
+      const tick = () => {
+        let val;
+        try { val = fn(); } catch (e) { val = undefined; }
+        if (val) return resolve(val);
+        if (performance.now() - start > timeoutMs) return reject(new Error('waitFor timeout'));
+        setTimeout(tick, intervalMs);
+      };
+      tick();
+    });
+  }
+
+  function dispatchPointer(type, target, x, y, pointerId = 1) {
+    target.dispatchEvent(new PointerEvent(type, {
+      clientX: x, clientY: y, pointerId, pointerType: 'mouse',
+      bubbles: true, cancelable: true,
+    }));
+  }
+
+  iframe.addEventListener('load', async () => {
+    try {
+      const idoc = iframe.contentDocument;
+      const iwin = iframe.contentWindow;
+
+      // Protocol: apply touch-device class so mobile media queries/CSS apply.
+      idoc.body.classList.add('touch-device');
+
+      // Patch Game.prototype.startMatch (inside the iframe realm) to capture
+      // the live instance on window.__game, per the verification protocol.
+      const patchScript = idoc.createElement('script');
+      patchScript.type = 'module';
+      patchScript.textContent = `
+        import('/js/core/Game.js').then(({ Game }) => {
+          const orig = Game.prototype.startMatch;
+          Game.prototype.startMatch = function (...args) {
+            window.__game = this;
+            return orig.apply(this, args);
+          };
+          window.__gamePatched = true;
+        });
+      `;
+      idoc.head.appendChild(patchScript);
+
+      await waitFor(() => iwin.__gamePatched);
+      await waitFor(() => idoc.getElementById('btn-quick-match'));
+
+      // Enter the match the same way a player would (menu -> Quick Match).
+      idoc.getElementById('btn-quick-match').click();
+      const game = await waitFor(() => iwin.__game);
+      const canvas = idoc.getElementById('game-canvas');
+
+      log('Game started. Running Phase 1 verification...\n');
+
+      // ---- Test 1: left-edge swipe -> paddle X near -0.673 within one frame.
+      dispatchPointer('pointerdown', canvas, 20, 600);
+      game.update(1 / 60);
+      assert(approx(game.paddle.basePosition.x, -0.673, 0.05),
+        `left-edge swipe -> paddle.x ~= -0.673 (got ${game.paddle.basePosition.x.toFixed(3)})`);
+
+      // ---- Test 2: right-edge swipe -> paddle X near +0.673 within one frame.
+      dispatchPointer('pointermove', iwin, 370, 600);
+      game.update(1 / 60);
+      assert(approx(game.paddle.basePosition.x, 0.673, 0.05),
+        `right-edge swipe -> paddle.x ~= +0.673 (got ${game.paddle.basePosition.x.toFixed(3)})`);
+
+      // ---- Test 3: drag to bottom of control zone (rest) -> max height, no reach.
+      dispatchPointer('pointermove', iwin, 195, 720);
+      game.update(1 / 60);
+      assert(approx(game.paddle.basePosition.y, 1.35, 0.03),
+        `rest position -> paddle.y ~= 1.35 (got ${game.paddle.basePosition.y.toFixed(3)})`);
+      assert(approx(game.paddle.basePosition.z, 1.70, 0.03),
+        `rest position -> paddle.z ~= 1.70 (got ${game.paddle.basePosition.z.toFixed(3)})`);
+
+      // ---- Test 4: drag to top of control zone -> full reach, low height, forward Z.
+      dispatchPointer('pointermove', iwin, 195, 396);
+      game.update(1 / 60);
+      assert(approx(game.paddle.basePosition.y, 0.785, 0.03),
+        `full reach -> paddle.y ~= 0.785 (got ${game.paddle.basePosition.y.toFixed(3)})`);
+      assert(approx(game.paddle.basePosition.z, 0.55, 0.05),
+        `full reach -> paddle.z ~= 0.55 (got ${game.paddle.basePosition.z.toFixed(3)})`);
+
+      dispatchPointer('pointerup', iwin, 195, 396);
+
+      // ---- Test 5: smoke run - auto-hit still works, no exceptions over N frames.
+      // Return the paddle to a resting position near the baseline first (Test 4
+      // parked it forward at the net), same as a player would before serving.
+      dispatchPointer('pointerdown', canvas, 195, 650);
+      game.update(1 / 60);
+      game.tossBall();
+      let threw = false;
+      try {
+        for (let i = 0; i < 240; i++) game.update(1 / 60);
+      } catch (e) {
+        threw = true;
+        log('EXCEPTION during smoke run: ' + e.message, 'fail');
+      }
+      assert(!threw, 'game.update runs 240 frames post-toss without throwing');
+      assert(game.rallyShotCount >= 1,
+        `auto-hit produced at least one shot after serving (rallyShotCount=${game.rallyShotCount}, state=${game.state})`);
+
+      game.sceneManager.render();
+
+      log(`\n${failCount === 0 ? 'ALL CHECKS PASSED' : failCount + ' CHECK(S) FAILED'}`, failCount === 0 ? 'pass' : 'fail');
+      window.__harnessDone = true;
+      window.__harnessFailCount = failCount;
+    } catch (err) {
+      log('HARNESS ERROR: ' + (err && err.stack || err), 'fail');
+      window.__harnessDone = true;
+      window.__harnessFailCount = -1;
+    }
+  });
+</script>
+</body>
+</html>

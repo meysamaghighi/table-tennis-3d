@@ -24,12 +24,13 @@ export const GameState = {
 };
 
 export class Game {
-    constructor(sceneManager, paddle, opponent, ballMesh, input) {
+    constructor(sceneManager, paddle, opponent, ballMesh, input, swipeInput) {
         this.sceneManager = sceneManager;
         this.paddle = paddle;
         this.opponent = opponent;
         this.ballMesh = ballMesh;
         this.input = input;
+        this.swipeInput = swipeInput;
         
         this.effects = new EffectsManager(sceneManager.scene);
         this.audio = new AudioManager();
@@ -227,7 +228,7 @@ export class Game {
         
         // Sync auto-tuned opponent difficulty, then update paddle.
         this.opponent.setDifficulty(this.autoTune.get('opponentDifficulty'));
-        this.paddle.update(this.input, dt, ballState, canHitBall, this.autoTune);
+        this.paddle.update(this.input, this.swipeInput, dt, ballState, canHitBall, this.autoTune);
         
         // Update effects
         this.effects.update(dt);
