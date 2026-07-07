@@ -23,32 +23,18 @@ export class InputManager {
         this.touchStartY = 0;
         this.touchStartTime = 0;
         this.hasTouchMoved = false;
-        
-        // Track mouse with movement accumulation (works even with pointer lock quirks)
-        this.virtualMouseX = 0;
-        this.virtualMouseY = 0;
-        this.mouseSensitivity = 0.003;
-        
+
         this.setupListeners();
     }
     
     setupListeners() {
         const canvas = document.getElementById('game-canvas');
         
-        // Mouse move - ALWAYS track mouse, even if touch is also active
+        // Mouse move - track absolute position only. Paddle control is owned by
+        // SwipeInput (pointer events) now; this stays for menu/pause niceties.
         this._boundHandlers.mousemove = (e) => {
-            // Accumulate movement for virtual position
-            this.virtualMouseX += e.movementX * this.mouseSensitivity;
-            this.virtualMouseY -= e.movementY * this.mouseSensitivity;
-            this.virtualMouseX = Math.max(-1, Math.min(1, this.virtualMouseX));
-            this.virtualMouseY = Math.max(-1, Math.min(1, this.virtualMouseY));
-            
-            // Also track absolute position
-            this.mouseRaw.x = e.clientX;
-            this.mouseRaw.y = e.clientY;
             this.mouse.dx = e.movementX || 0;
             this.mouse.dy = e.movementY || 0;
-            
             this.updateMouseFromClient(e.clientX, e.clientY);
         };
         
@@ -119,12 +105,10 @@ export class InputManager {
             
             this._boundHandlers.touchend = (e) => {
                 e.preventDefault();
+                // Taps no longer swing — swipe-to-hit (SwipeInput) owns contact.
+                // This handler only releases the tracked touch id.
                 for (let i = 0; i < e.changedTouches.length; i++) {
                     if (e.changedTouches[i].identifier === this.touchId) {
-                        const duration = Date.now() - this.touchStartTime;
-                        if (!this.hasTouchMoved && duration < 250) {
-                            this.triggerSwing();
-                        }
                         this.touchId = null;
                         break;
                     }
@@ -175,18 +159,9 @@ export class InputManager {
     }
     
     justClicked() {
-        const result = this.clicked || (this.isMouseDown && !this.wasMouseDown);
-        if (result) {
-        }
-        return result;
+        return this.clicked || (this.isMouseDown && !this.wasMouseDown);
     }
-    
-    triggerSwing() {
-        this.isMouseDown = true;
-        this.wasMouseDown = false;
-        this.clicked = true;
-    }
-    
+
     on(event, callback) {
         if (!this._callbacks[event]) this._callbacks[event] = [];
         this._callbacks[event].push(callback);

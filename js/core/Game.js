@@ -4,15 +4,21 @@
  */
 
 import * as THREE from 'three';
-import { PhysicsEngine, TABLE_LENGTH } from './Physics.js';
+import { PhysicsEngine } from './Physics.js';
 import { Equipment } from './Equipment.js';
 import { EffectsManager } from '../three/Effects.js';
 import { AudioManager } from './Audio.js';
 import { GameDebugger } from './Debugger.js';
 import { AutoTune } from './AutoTune.js';
+import { computeShot, solvePlayerShot, SWIPE_HIT_THRESHOLD } from './SwipeShot.js';
 
 const WINNING_SCORE = 11;
 const SERVE_CHANGE_INTERVAL = 2;
+
+// Swipe-to-hit tuning (Phase 3). The paddle is finger-controlled; a rally hit
+// fires when the ball is inside this reach sphere, moving toward the player,
+// and the finger is sweeping through it faster than SWIPE_HIT_THRESHOLD.
+const HIT_REACH = 0.45;
 
 export const GameState = {
     MENU: 'menu',
@@ -125,8 +131,10 @@ export class Game {
         );
     }
     
-    tossBall() {
+    tossBall(serveParams) {
         if (!this.ballToss.active && this.state === GameState.SERVING && this.server === 'player') {
+            // Swipe-derived aim/spin for the strike that follows on descent.
+            this._pendingServe = serveParams || { aimX: 0, sideSpin: 0 };
             this.ballToss.active = true;
             this.physics.ball.position.set(0, 1.2, 1.45);
             this.ballToss.velocity.set(
@@ -151,57 +159,22 @@ export class Game {
             return;
         }
         
-        // CRITICAL: Read click BEFORE input.update() clears it!
-        const justClicked = this.input.justClicked();
-        
-        // Update input (clears click flags)
+        // Update input (clears click flags — justClicked is only used by
+        // menu/pause now, handled via DOM buttons and keyboard events).
         this.input.update(dt);
-        
+
         // Update physics
         const events = this.physics.update(dt);
         this.handlePhysicsEvents(events);
-        
+
         const ballState = this.physics.getBallState();
         const paddlePos = this.paddle.getHitPosition();
         const distToBall = ballState.active ? paddlePos.distanceTo(ballState.position) : 999;
-        const canHitBall = ballState.active && distToBall < 0.35 && ballState.lastHitBy !== 'player';
-        
-        // ---- DEBUGGER: Log click attempt ----
-        if (justClicked && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
-            this.debugger.logClick(
-                this.frameCount || 0,
-                ballState,
-                paddlePos,
-                this.paddle.swingState,
-                distToBall
-            );
-        }
-        
-        // Player serve: a click/tap kicks off the toss; from there auto-hit handles it.
-        if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
-            if (justClicked) {
-                this.tossBall();
-            }
-        }
+        const canHitBall = ballState.active && distToBall < HIT_REACH && ballState.lastHitBy !== 'player';
 
-        // AUTO-HIT: no click required. The paddle swings on its own whenever the
-        // ball enters the hit window. Works for both rallies and serves.
-        if (ballState.active && ballState.lastHitBy !== 'player'
-            && (this.state === GameState.SERVING || this.state === GameState.RALLY)) {
+        // ---- Swipe-to-hit: finger sweeps drive serves and rally returns ----
+        this.handleSwipeInput(ballState, paddlePos, distToBall);
 
-            const serveReady = this.state === GameState.SERVING
-                && this.ballToss.active
-                && ballState.velocity.y < 0               // ball is falling
-                && ballState.position.y < 1.10;           // let it drop to a hittable height
-            const rallyReady = this.state === GameState.RALLY
-                && ballState.velocity.z > 0;              // ball moving toward player
-
-            if ((serveReady || rallyReady) && distToBall < 0.55) {
-                if (this.paddle.swingState === 'ready') this.paddle.triggerSwing();
-                this.processPaddleHit(ballState, paddlePos, distToBall);
-            }
-        }
-        
         // Update opponent AI
         this.opponent.update(dt, ballState, ballState.active);
         
@@ -224,7 +197,7 @@ export class Game {
         this.debugger.logPaddleState(this.frameCount || 0, paddlePos);
         
         // Update debug UI
-        this.updateDebugUI(ballState, paddlePos, distToBall, justClicked, this.input);
+        this.updateDebugUI(ballState, paddlePos, distToBall, this.input);
         
         // Sync auto-tuned opponent difficulty, then update paddle.
         this.opponent.setDifficulty(this.autoTune.get('opponentDifficulty'));
@@ -255,17 +228,18 @@ export class Game {
         this.frameCount = (this.frameCount || 0) + 1;
     }
     
-    updateDebugUI(ballState, paddlePos, distToBall, justClicked, input) {
+    updateDebugUI(ballState, paddlePos, distToBall, input) {
         // Real-time status
         const status = this.debugger.getRealTimeStatus(ballState, paddlePos, this.paddle.swingState, distToBall);
         const debugInfo = document.getElementById('debug-info');
         if (debugInfo && status) {
+            const m = this.getSwipeMetrics();
             debugInfo.innerHTML = `
-<span style="color:#0f0">${status.canHit ? '✓ CAN HIT' : '✗ TOO FAR'}</span> | 
+<span style="color:#0f0">${status.canHit ? '✓ CAN HIT' : '✗ TOO FAR'}</span> |
 dist: ${status.dist}m | ballZ: ${status.ballZ} | ballY: ${status.ballY}<br>
-swing: ${status.swingState} | clicked: ${justClicked} | lastHit: ${status.lastHitBy}<br>
-mouseX: ${input.mouse.x.toFixed(2)} | virtualX: ${input.virtualMouseX.toFixed(2)} | touch: ${input.isTouch}<br>
-Clicks: ${status.sessionClicks} | Hits: ${status.sessionHits} | Auto: ${status.sessionAutoHits} | Miss: ${status.sessionMisses}
+swing: ${status.swingState} | lastHit: ${status.lastHitBy}<br>
+swipe: ${m.speedNorm.toFixed(2)}sw/s | hDir: ${m.hDir.toFixed(2)} | vDir: ${m.vDir.toFixed(2)} | curve: ${m.curvature.toFixed(2)}<br>
+Rally shots: ${this.rallyShotCount}
             `.trim();
         }
         
@@ -386,103 +360,108 @@ Top Miss Reason: ${s.topMissReason}
         }
     }
     
-    checkPaddleContact() {
-        const ballState = this.physics.getBallState();
-        const paddlePos = this.paddle.getHitPosition();
-        const dist = paddlePos.distanceTo(ballState.position);
-        
-        // DEBUG: huge hit radius for testing
-        if (dist > 0.50) {
-            this.debugger.logMiss(this.frameCount || 0, 'too_far', { dist });
-            return;
+    /**
+     * Normalized finger metrics for the current swipe. Speed is expressed in
+     * screen-widths/second so power tiers feel the same on a 390px phone and a
+     * wide desktop window. `hDir`/`vDir` are direction cosines (vDir > 0 = up).
+     */
+    getSwipeMetrics() {
+        const si = this.swipeInput;
+        const el = si && si.element;
+        let w = 390;
+        if (el && el.getBoundingClientRect) {
+            const r = el.getBoundingClientRect();
+            if (r.width > 0) w = r.width;
+        } else if (typeof window !== 'undefined' && window.innerWidth) {
+            w = window.innerWidth;
         }
-        
-        if (ballState.lastHitBy === 'player') {
-            this.debugger.logMiss(this.frameCount || 0, 'already_hit', { lastHitBy: ballState.lastHitBy });
-            return;
-        }
-        
-        this.paddle.markHit();
-        this.processPaddleHit(ballState, paddlePos, dist);
+        const vx = si.velocity.x, vy = si.velocity.y;
+        const speedPx = Math.hypot(vx, vy);
+        const speedNorm = speedPx / w;
+        const hDir = speedPx > 1 ? vx / speedPx : 0;
+        const vDir = speedPx > 1 ? -vy / speedPx : 0;   // screen y grows downward → up is negative
+        return { speedNorm, hDir, vDir, dirSign: Math.sign(vx) || 1, curvature: si.pathCurvature || 0 };
     }
-    
-    processPaddleHit(ballState, paddlePos, dist) {
-        const sweetSpotDist = Math.sqrt(
-            (ballState.position.x - paddlePos.x) ** 2 +
-            (ballState.position.y - paddlePos.y) ** 2
-        );
-        const hitQuality = Math.max(0.3, 1.0 - sweetSpotDist * 3);
 
-        // Was this an auto-hit (no recent manual click)?
-        const recentClicks = this.debugger.session.clicks.slice(-3);
-        const wasAuto = recentClicks.length === 0 ||
-            (performance.now() - recentClicks[recentClicks.length - 1].time) > 500;
-        this.debugger.logHit(this.frameCount || 0, ballState, paddlePos, hitQuality, wasAuto);
+    handleSwipeInput(ballState, paddlePos, distToBall) {
+        const m = this.getSwipeMetrics();
+        const swiping = m.speedNorm > SWIPE_HIT_THRESHOLD;
 
-        const props        = this.equipment.getPaddleProperties();
-        const paddleNormal = this.paddle.getPaddleNormal();
-
-        // Per-shot power: pro players don't swing the same way at every ball.
-        // Scale the swing magnitude by ball height + incoming speed so high
-        // balls get smashed, low pushes stay soft, and fast incoming gets blocked.
-        const baseThrust    = this.autoTune.get('paddleThrust');
-        const heightAbove   = ballState.position.y - 0.76;        // TABLE_HEIGHT
-        const incomingSpeed = ballState.velocity.length();
-        let thrustMul = 1.0;
-        if (heightAbove > 0.25)        thrustMul = 1.30;          // smash
-        else if (heightAbove < 0.06)   thrustMul = 0.70;          // soft push
-        if (incomingSpeed > 6.0)       thrustMul *= 0.80;         // block fast incoming
-        if (this.state === GameState.SERVING) thrustMul = 0.80;   // serves are placed, not smashed
-        const paddleVel = new THREE.Vector3(0, 0, -baseThrust * thrustMul);
-
-        const result = this.physics.calculateHit(
-            ballState.position, ballState.velocity, ballState.spin,
-            paddlePos, paddleVel, paddleNormal,
-            props, hitQuality
-        );
-
-        const speed     = result.velocity.length();
-        const aimAssist = this.autoTune.get('aimAssist');
-        const shotArc   = this.autoTune.get('shotArc');
-        const aimX      = this.input.mouse.x * 0.5;
-
-        if (this.state === GameState.SERVING) {
-            // Auto-serve uses a shaped velocity profile instead of raw hit
-            // physics: bounce own side (~z 0.3), clear the net, land short on
-            // the opponent's side (~z -0.3). Range validated against the
-            // physics engine (legal for vy 1.2-1.6 / vz -2.4..-2.8 from the
-            // contact point at y~1.05, z~1.45).
-            const vy = 1.3 + Math.random() * 0.3;
-            const vz = -2.5 - Math.random() * 0.3;
-            result.velocity.set(aimX * 0.8, vy, vz);
-            // Light backspin only — Magnus from the raw hit spin (topspin,
-            // ~80 rad/s) dives this trajectory straight into the net.
-            result.spin.set(10 + Math.random() * 15, 0, 0);
-        } else {
-            // Direction assist: blend outgoing velocity toward a sensible target on
-            // the opponent's court — straight ahead with mouse-controlled lateral bias.
-            if (aimAssist > 0 && speed > 0.1) {
-                const target = new THREE.Vector3(aimX, 0.18, -1).normalize().multiplyScalar(speed);
-                result.velocity.lerp(target, aimAssist);
+        // ---- Serve: an upward swipe tosses the ball and arms the strike. ----
+        if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
+            if (swiping && m.vDir > 0.2) {
+                this.tossBall({
+                    aimX: m.hDir * 0.25,
+                    sideSpin: Math.max(-25, Math.min(25, m.dirSign * m.curvature * 120)),
+                });
             }
-            // Net-clearance arc (auto-tuned). No more hard `Math.max(0.25, y)` clamp.
-            result.velocity.y += shotArc;
         }
 
-        this.physics.ball.hit(result.velocity, result.spin, 'player');
+        // ---- Serve strike: fire on the toss's descent (one motion). ----
+        if (this.state === GameState.SERVING && this.server === 'player'
+            && this.ballToss.active && ballState.lastHitBy === null
+            && ballState.velocity.y < 0 && ballState.position.y < 1.15) {
+            this.paddle.triggerSwing();
+            this.processServeHit(ballState);
+            return;
+        }
 
-        const hitIntensity = result.velocity.length() / 8;
+        // ---- Rally: swipe through the ball while it's in reach and incoming. ----
+        if (this.state === GameState.RALLY && ballState.active && ballState.lastHitBy !== 'player') {
+            const towardPlayer = ballState.velocity.z > 0;
+            if (towardPlayer && distToBall < HIT_REACH && swiping) {
+                this.paddle.triggerSwing();
+                this.processSwipeHit(ballState, paddlePos, m);
+            }
+        }
+    }
+
+    processServeHit(ballState) {
+        const serve = this._pendingServe || { aimX: 0, sideSpin: 0 };
+        // Shaped serve profile: bounce own side, clear the net, land short on
+        // the opponent's side. Velocity range validated against the physics
+        // engine (legal for vy 1.2-1.6 / vz -2.4..-2.8 from contact y~1.05).
+        // Aim and sidespin come from the serve swipe; a light backspin baseline
+        // keeps the low trajectory from diving into the net.
+        const vy = 1.3 + Math.random() * 0.3;
+        const vz = -2.5 - Math.random() * 0.3;
+        const velocity = new THREE.Vector3(serve.aimX * 0.8, vy, vz);
+        const spin = new THREE.Vector3(10 + Math.random() * 10, 0, serve.sideSpin);
+
+        this.physics.ball.hit(velocity, spin, 'player');
+
+        const hitIntensity = velocity.length() / 8;
         this.effects.spawnHitParticles(ballState.position, hitIntensity);
         this.audio.playHit(hitIntensity);
-
-        this.identifyShot(result.velocity, result.spin, 'player');
+        this.identifyShot(velocity, spin, 'player');
         this.rallyShotCount++;
-
-        if (this.state === GameState.SERVING) {
-            this.setState(GameState.RALLY);
-        }
+        // State stays SERVING; handleBounce promotes to RALLY once the serve
+        // legally reaches the receiver's side (and faults it otherwise).
     }
-    
+
+    processSwipeHit(ballState, paddlePos, m) {
+        const contact = {
+            x: ballState.position.x,
+            y: ballState.position.y,
+            z: ballState.position.z,
+        };
+        // Timing: ball still in front of the paddle plane = early (cross-court);
+        // ball already past it = late (down-the-line).
+        const timing = Math.max(-1, Math.min(1, (ballState.position.z - paddlePos.z) / 0.3));
+        const shot = computeShot({ ...m, timing });
+        const solved = solvePlayerShot(contact, shot.targetLanding, shot.arcHeight, shot.spin);
+
+        const velocity = new THREE.Vector3(solved.velocity.x, solved.velocity.y, solved.velocity.z);
+        const spin = new THREE.Vector3(shot.spin.x, shot.spin.y, shot.spin.z);
+        this.physics.ball.hit(velocity, spin, 'player');
+
+        const hitIntensity = velocity.length() / 8;
+        this.effects.spawnHitParticles(ballState.position, hitIntensity);
+        this.audio.playHit(hitIntensity);
+        this.identifyShot(velocity, spin, 'player');
+        this.rallyShotCount++;
+    }
+
     handleOpponentHit() {
         const ballState = this.physics.getBallState();
         const hitData = this.opponent.getHitData();

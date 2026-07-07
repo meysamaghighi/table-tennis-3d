@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phase 3 Harness — Swipe-to-Hit + Serve (integration)</title>
+<style>
+  body { background:#111; color:#eee; font-family: monospace; padding: 16px; }
+  #frame-wrap { display:inline-block; border:2px solid #444; vertical-align: top; }
+  iframe { width:390px; height:720px; border:0; display:block; }
+  #log { white-space: pre-wrap; margin-top: 16px; max-width: 760px; display: inline-block; vertical-align: top; margin-left: 24px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ff5252; }
+  .info { color: #9cf; }
+</style>
+</head>
+<body>
+<h2>Phase 3 Harness — Swipe-to-Hit + Serve (drives the live Game)</h2>
+<div id="frame-wrap"><iframe id="game-frame" src="/index.html"></iframe></div>
+<div id="log">Loading…</div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  const lines = [];
+  let failCount = 0;
+  function log(msg, cls) {
+    lines.push(cls ? `<span class="${cls}">${msg}</span>` : msg);
+    logEl.innerHTML = lines.join('\n');
+    console.log(msg);
+  }
+  function assert(cond, msg) {
+    if (cond) log(`PASS  ${msg}`, 'pass');
+    else { log(`FAIL  ${msg}`, 'fail'); failCount++; }
+  }
+  function waitFor(fn, timeoutMs = 8000, intervalMs = 50) {
+    return new Promise((resolve, reject) => {
+      const start = performance.now();
+      const tick = () => {
+        let val; try { val = fn(); } catch (e) { val = undefined; }
+        if (val) return resolve(val);
+        if (performance.now() - start > timeoutMs) return reject(new Error('waitFor timeout'));
+        setTimeout(tick, intervalMs);
+      };
+      tick();
+    });
+  }
+
+  const iframe = document.getElementById('game-frame');
+
+  // ---- Swipe drivers: set SwipeInput fields directly. This is the exact
+  // contract Game.getSwipeMetrics() consumes, and it's deterministic (no
+  // reliance on performance.now sample timing, which is throttled/jittery in
+  // background tabs). Pointer-event tracking itself was verified in Phase 1.
+  const W = 390; // iframe width; matches SwipeInput element width
+  function clearSwipe(g) { g.swipeInput.velocity.x = 0; g.swipeInput.velocity.y = 0; g.swipeInput.pathCurvature = 0; }
+  function setSwipe(g, speedNorm, hFrac, curvature) {
+    // speedNorm in screen-widths/s; hFrac in [-1,1] horizontal fraction; rest is upward.
+    const speedPx = speedNorm * W;
+    const vx = hFrac * speedPx;
+    const vy = -Math.sqrt(Math.max(0, speedPx * speedPx - vx * vx)); // up = negative
+    g.swipeInput.velocity.x = vx;
+    g.swipeInput.velocity.y = vy;
+    g.swipeInput.pathCurvature = curvature || 0;
+  }
+  // Place the finger so the paddle tracks to (approximately) the ball. Paddle
+  // maps position.y → both height and forward reach, so we pick sy from the
+  // ball's z and let x follow the ball's x.
+  function aimPaddleAtBall(g, bs) {
+    // Paddle traces a line as position.y (sy) goes 0→1:
+    //   y(sy) = 0.78 + 0.57·sy,  z(sy) = 0.55 + 1.15·sy
+    // Pick sy that minimizes 3D distance to the ball (least squares in sy).
+    const by = bs.position.y, bz = bs.position.z;
+    let sy = (0.57 * (by - 0.78) + 1.15 * (bz - 0.55)) / 1.6474;
+    sy = Math.max(0, Math.min(1, sy));
+    g.swipeInput.position.x = Math.max(-1, Math.min(1, bs.position.x / 0.75));
+    g.swipeInput.position.y = sy;
+  }
+
+  // Advance past the POINT_END → SERVING delay, which is a setTimeout(1500) and
+  // therefore never fires inside a synchronous step loop. The real timer no-ops
+  // once we've moved on (it guards on state === POINT_END).
+  function pumpPointEnd(g) {
+    if (g.state === 'point_end') { g.resetBall(); g.setState('serving'); g.debugger.startPoint(); }
+  }
+
+  iframe.addEventListener('load', async () => {
+    try {
+      const idoc = iframe.contentDocument;
+      const iwin = iframe.contentWindow;
+      idoc.body.classList.add('touch-device');
+
+      const patch = idoc.createElement('script');
+      patch.type = 'module';
+      patch.textContent = `
+        import('/js/core/Game.js').then(({ Game }) => {
+          const orig = Game.prototype.startMatch;
+          Game.prototype.startMatch = function (...a) {
+            window.__game = this;
+            window.__points = [];
+            const sp = this.scorePoint.bind(this);
+            this.scorePoint = (winner) => {
+              window.__points.push({ winner, reason: this._lastEndReason, lastHitBy: this._lastHitByAtEnd, rallyShots: this.rallyShotCount });
+              return sp(winner);
+            };
+            return orig.apply(this, a);
+          };
+          window.__gamePatched = true;
+        });
+      `;
+      idoc.head.appendChild(patch);
+
+      await waitFor(() => iwin.__gamePatched);
+      await waitFor(() => idoc.getElementById('btn-quick-match'));
+      idoc.getElementById('btn-quick-match').click();
+      const g = await waitFor(() => iwin.__game);
+      log('Game started. Running Phase 3 integration tests…\n', 'info');
+
+      // ================= TEST 1: serve by swipe → legal rally =================
+      // Player serves first (startMatch sets server='player'). An upward swipe
+      // tosses; the strike fires on descent; a legal serve reaches RALLY.
+      let reachedRally = false, playerServed = false;
+      for (let i = 0; i < 300; i++) {
+        clearSwipe(g);
+        if (g.state === 'serving' && g.server === 'player' && !g.ballToss.active) {
+          setSwipe(g, 4.0, 0.0, 0); // medium upward serve swipe
+        }
+        g.update(1 / 60);
+        if (g.physics.ball.lastHitBy === 'player') playerServed = true;
+        if (g.state === 'rally') { reachedRally = true; break; }
+        if (g.state === 'point_end' || g.state === 'game_over') break;
+      }
+      assert(playerServed, 'serve swipe struck the ball (ball.lastHitBy === "player")');
+      assert(reachedRally, `serve legally reached RALLY (state=${g.state})`);
+
+      // ================= TEST 2: rally return heads to opponent =================
+      // From the current rally, auto-return until the player hits, then confirm
+      // the outgoing ball is aimed at the opponent's court (velocity.z < 0).
+      let returned = false, outgoingZ = null;
+      for (let i = 0; i < 600; i++) {
+        clearSwipe(g);
+        const bs = g.physics.getBallState();
+        if (g.state === 'serving' && g.server === 'player' && !g.ballToss.active) {
+          setSwipe(g, 4.0, 0.0, 0);
+        } else if (g.state === 'rally' && bs.active && bs.lastHitBy === 'opponent'
+            && bs.velocity.z > 0 && bs.position.z > 0.4 && Math.abs(bs.position.x) < 0.75) {
+          aimPaddleAtBall(g, bs);
+          setSwipe(g, 4.2, 0.1, 0);
+        }
+        g.update(1 / 60);
+        if (g.physics.ball.lastHitBy === 'player' && g.rallyShotCount >= 2) {
+          returned = true;
+          outgoingZ = g.physics.ball.velocity.z;
+          break;
+        }
+        pumpPointEnd(g);
+        if (g.state === 'game_over') break;
+      }
+      assert(returned, 'player returned an opponent shot during the rally');
+      assert(outgoingZ !== null && outgoingZ < 0,
+        `returned ball is aimed at opponent court (velocity.z=${outgoingZ == null ? 'n/a' : outgoingZ.toFixed(2)} < 0)`);
+
+      // ================= TEST 3: whiff (no swipe) loses the point =================
+      // Seed an incoming ball that has already bounced once on the player's side
+      // and is about to bounce again there. With no swipe it double-bounces →
+      // point to the opponent.
+      const pointsBefore = iwin.__points.length;
+      g.setState('rally');
+      const b = g.physics.ball;
+      b.active = true; b.lastHitBy = 'opponent';
+      b.bounces = 1; b.lastBounceSide = 'player';
+      b.position.set(0, 0.80, 0.55);
+      b.velocity.set(0, 0.6, 0.25);
+      b.spin.set(0, 0, 0);
+      g.bouncePositions = [{ z: 0.6 }];
+      g.rallyShotCount = 0; g._lastEndReason = null;
+      g.ballMesh.setVisible(true);
+      let whiffScored = null;
+      for (let i = 0; i < 240; i++) {
+        clearSwipe(g); // never swipe → whiff
+        g.update(1 / 60);
+        if (iwin.__points.length > pointsBefore) { whiffScored = iwin.__points[iwin.__points.length - 1]; break; }
+      }
+      assert(whiffScored && whiffScored.winner === 'opponent',
+        `whiff loses the point to opponent (winner=${whiffScored ? whiffScored.winner : 'none'}, reason=${whiffScored ? whiffScored.reason : 'n/a'})`);
+      pumpPointEnd(g);
+
+      // ============ TEST 4: player swipe-returns land legally in-court ============
+      // The core Phase-3 guarantee: a well-aimed swipe produces a legal shot
+      // (bounces on the opponent's side, in bounds) — not a net/out error. This
+      // isolates the swipe→solver→hit pipeline from AI strength / placement.
+      function trialReturn(y0, z0, x0, vz, speedNorm) {
+        const bb = g.physics.ball;
+        g.setState('rally');
+        bb.active = true; bb.lastHitBy = 'opponent';
+        bb.bounces = 1; bb.lastBounceSide = 'player';
+        bb.position.set(x0, y0, z0);
+        bb.velocity.set(0, -0.5, vz); // toward player, descending
+        bb.spin.set(0, 0, 0);
+        g.bouncePositions = [{ z: 0.6 }]; g.rallyShotCount = 0; g._lastEndReason = null;
+        g.ballMesh.setVisible(true);
+        const ptsB = iwin.__points.length;
+        let hit = false;
+        for (let i = 0; i < 260; i++) {
+          clearSwipe(g);
+          const bs = g.physics.getBallState();
+          if (!hit && g.state === 'rally' && bs.lastHitBy === 'opponent'
+              && bs.velocity.z > 0 && bs.position.z > 0.35 && Math.abs(bs.position.x) < 0.8) {
+            aimPaddleAtBall(g, bs);
+            setSwipe(g, speedNorm, 0.1, 0);
+          }
+          g.update(1 / 60);
+          if (g.physics.ball.lastHitBy === 'player') hit = true;
+          // Legal return: after the player hits, the ball bounces opponent side.
+          if (hit && g.physics.ball.lastBounceSide === 'opponent') return { hit: true, legal: true };
+          if (iwin.__points.length > ptsB) {
+            // A point ended first — legal only if the opponent lost it (player winner).
+            const p = iwin.__points[iwin.__points.length - 1];
+            return { hit, legal: hit && p.winner === 'player' };
+          }
+        }
+        return { hit, legal: false };
+      }
+      let legalCount = 0, hitCount = 0, trials = 0;
+      for (const y0 of [0.85, 1.0, 1.15]) {
+        for (const z0 of [0.7, 1.0, 1.3]) {
+          for (const vz of [1.2, 2.4]) {
+            for (const speedNorm of [2.2, 4.2, 6.5]) {
+              const r = trialReturn(y0, z0, (Math.random() - 0.5) * 0.4, vz, speedNorm);
+              trials++; if (r.hit) hitCount++; if (r.legal) legalCount++;
+              pumpPointEnd(g);
+            }
+          }
+        }
+      }
+      const legalRate = legalCount / trials;
+      log(`Return legality: ${legalCount}/${trials} legal (${(100 * legalRate).toFixed(0)}%), hit ${hitCount}/${trials}`, 'info');
+      assert(legalRate >= 0.8, `≥80% of swipe-returns land legally in-court (got ${(100 * legalRate).toFixed(0)}%)`);
+
+      // ================= TEST 5: full auto-played match completes =================
+      let threw = false, gameOver = false, frames = 0;
+      const MAX_FRAMES = 60000; // ~1000s sim; the loop itself runs in well under a second
+      try {
+        for (; frames < MAX_FRAMES; frames++) {
+          clearSwipe(g);
+          const bs = g.physics.getBallState();
+          if (g.state === 'serving' && g.server === 'player' && !g.ballToss.active) {
+            setSwipe(g, 4.0, (Math.random() - 0.5) * 0.5, 0);
+          } else if (g.state === 'rally' && bs.active && bs.lastHitBy !== 'player'
+                     && bs.velocity.z > 0 && bs.position.z > 0.4 && Math.abs(bs.position.x) < 0.75) {
+            aimPaddleAtBall(g, bs);
+            setSwipe(g, 3.6 + Math.random() * 3.0, (Math.random() - 0.5) * 0.6, Math.random() * 0.1);
+          }
+          g.update(1 / 60);
+          pumpPointEnd(g);
+          if (g.state === 'game_over') { gameOver = true; break; }
+        }
+      } catch (e) {
+        threw = true;
+        log('EXCEPTION during match: ' + (e && e.stack || e), 'fail');
+      }
+      const pts = iwin.__points;
+      const pScore = g.score.player, oScore = g.score.opponent;
+      log(`\nMatch: ${frames} frames, ${pts.length} points, score ${pScore}-${oScore}, gameOver=${gameOver}`, 'info');
+      const avgRally = pts.reduce((s, p) => s + (p.rallyShots || 0), 0) / Math.max(1, pts.length);
+      log(`Avg rally shots/point: ${avgRally.toFixed(2)}`, 'info');
+      assert(!threw, 'full auto-played match ran without throwing');
+      assert(pts.length > 0, `points were scored (${pts.length} points)`);
+      assert(gameOver, `match reached GAME_OVER (final ${pScore}-${oScore})`);
+      assert(avgRally >= 1.5, `rallies are real exchanges, not degenerate (avg ${avgRally.toFixed(2)} shots ≥ 1.5)`);
+      // NOTE: the harness auto-player is intentionally naive (it doesn't aim for
+      // open court), so a lopsided score here is expected and is an AI/placement
+      // concern for Phase 4 — not a swipe-mechanic failure. Return legality
+      // (Test 4) is the fairness signal for Phase 3.
+
+      g.sceneManager.render();
+      log(`\n${failCount === 0 ? 'ALL CHECKS PASSED' : failCount + ' CHECK(S) FAILED'}`, failCount === 0 ? 'pass' : 'fail');
+      window.__harnessDone = true;
+      window.__harnessFailCount = failCount;
+    } catch (err) {
+      log('HARNESS ERROR: ' + (err && err.stack || err), 'fail');
+      window.__harnessDone = true;
+      window.__harnessFailCount = -1;
+    }
+  });
+</script>
+</body>
+</html>

@@ -226,12 +226,6 @@ export class UIManager {
                 this.showOverlay('gameOver');
             }
 
-            // Toss button only relevant while the player is waiting to serve.
-            const tossBtn = document.getElementById('btn-mobile-toss');
-            if (tossBtn) {
-                const playerServing = (newState === 'serving' && this.game.server === 'player');
-                tossBtn.classList.toggle('visible', playerServing);
-            }
         };
         
         this.game.onMessage = (msg) => {
@@ -239,14 +233,8 @@ export class UIManager {
         };
         
         this.game.onServeChange = (server) => {
-            document.getElementById('serve-indicator').textContent = 
+            document.getElementById('serve-indicator').textContent =
                 server === 'player' ? 'Your Serve' : "Opponent's Serve";
-            
-            // Show/hide mobile toss button
-            const tossBtn = document.getElementById('btn-mobile-toss');
-            if (tossBtn) {
-                tossBtn.classList.toggle('visible', server === 'player');
-            }
         };
         
         this.game.onShotInfo = (shotType, spinType, hitter) => {

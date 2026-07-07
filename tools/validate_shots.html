@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phase 3 Harness — Swipe→Shot Validation</title>
+<style>
+  body { background:#111; color:#eee; font-family: monospace; padding: 16px; }
+  #summary { font-size: 1.1em; margin-bottom: 12px; }
+  h3 { margin: 16px 0 4px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ff5252; }
+  table { border-collapse: collapse; font-size: 0.8em; }
+  td, th { border: 1px solid #333; padding: 2px 6px; text-align: right; }
+  th { color: #9cf; }
+  ul { list-style: none; padding-left: 0; }
+  li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<h2>Phase 3 Harness — Swipe→Shot Mapping + Solver Validation</h2>
+<div id="summary">Running…</div>
+<div id="assertions"></div>
+<div id="table-wrap"></div>
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+  import { runValidation } from './validate_shots.js';
+
+  const { rows, passed, total, passRate, perTier, assertions } = runValidation();
+
+  const pct = (passRate * 100).toFixed(1);
+  const gridOk = passRate >= 0.85;
+  const allAssert = assertions.every(a => a.ok);
+  const summaryEl = document.getElementById('summary');
+  summaryEl.innerHTML =
+    `<span class="${gridOk ? 'pass' : 'fail'}">Grid: ${passed}/${total} land within 15cm (${pct}%) — target ≥85%</span><br>` +
+    Object.entries(perTier).map(([t, s]) =>
+      `&nbsp;&nbsp;${t}: ${s.pass}/${s.total} (${(100 * s.pass / s.total).toFixed(0)}%)`).join('<br>');
+  console.log(`Swipe→shot validation: ${passed}/${total} (${pct}%)`, perTier);
+
+  const aEl = document.getElementById('assertions');
+  aEl.innerHTML = '<h3>Assertions</h3><ul>' + assertions.map(a =>
+    `<li class="${a.ok ? 'pass' : 'fail'}">${a.ok ? 'PASS' : 'FAIL'} — ${a.name} <span style="color:#888">(${a.detail})</span></li>`
+  ).join('') + '</ul>';
+  assertions.forEach(a => console.log(`${a.ok ? 'PASS' : 'FAIL'}  ${a.name} — ${a.detail}`));
+
+  const failures = rows.filter(r => !r.ok);
+  if (failures.length) {
+    const header = '<tr><th>tier</th><th>c.x</th><th>c.y</th><th>c.z</th><th>tgt.x</th><th>tgt.z</th><th>arc</th><th>spin.x</th><th>spin.z</th><th>land.z</th><th>err</th><th>reason</th></tr>';
+    const body = failures.slice(0, 200).map(r => `<tr>
+      <td>${r.tier}</td><td>${r.contact.x}</td><td>${r.contact.y}</td><td>${r.contact.z}</td>
+      <td>${r.shot.targetLanding.x.toFixed(2)}</td><td>${r.shot.targetLanding.z.toFixed(2)}</td>
+      <td>${r.shot.arcHeight}</td><td>${r.shot.spin.x.toFixed(0)}</td><td>${r.shot.spin.z.toFixed(0)}</td>
+      <td>${r.land.z.toFixed(2)}</td><td>${Number.isFinite(r.error) ? r.error.toFixed(3) : 'inf'}</td><td>${r.reason}</td>
+    </tr>`).join('');
+    document.getElementById('table-wrap').innerHTML =
+      `<h3>Failing rows (${failures.length}, showing up to 200)</h3><table>${header}${body}</table>`;
+  }
+
+  window.__validationDone = true;
+  window.__validationPassRate = passRate;
+  window.__validationAssertOk = allAssert;
+  window.__validationGridOk = gridOk;
+</script>
+</body>
+</html>

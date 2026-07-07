@@ -79,20 +79,9 @@ class App {
         const clickPrompt = document.getElementById('click-prompt');
         if (clickPrompt) clickPrompt.style.display = 'none';
 
-        const tossBtn = document.getElementById('btn-mobile-toss');
+        // Serving is a swipe-up now (SwipeInput → Game.handleSwipeInput); no TOSS button.
         const pauseBtn = document.getElementById('btn-mobile-pause');
-        
-        if (tossBtn) {
-            tossBtn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.game.tossBall();
-            }, { passive: false });
-            tossBtn.addEventListener('mousedown', (e) => {
-                e.preventDefault();
-                this.game.tossBall();
-            });
-        }
-        
+
         if (pauseBtn) {
             pauseBtn.addEventListener('touchstart', (e) => {
                 e.preventDefault();
