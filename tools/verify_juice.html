@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phase 6 Harness — Juice timing</title>
+<style>
+  body { background:#111; color:#eee; font-family: monospace; padding: 16px; }
+  #frame-wrap { display:inline-block; border:2px solid #444; }
+  iframe { width:390px; height:720px; border:0; display:block; }
+  #log { white-space: pre-wrap; margin-top: 16px; max-width: 780px; display:inline-block; vertical-align:top; margin-left:24px; }
+  .pass { color:#4caf50; } .fail { color:#ff5252; } .info { color:#9cf; }
+</style>
+</head>
+<body>
+<h2>Phase 6 Harness — Juice (hit-stop / slow-mo / triggers)</h2>
+<div id="frame-wrap"><iframe id="game-frame" src="/index.html"></iframe></div>
+<div id="log">Loading…</div>
+<script type="module">
+  const logEl = document.getElementById('log'); const lines = []; let fail = 0;
+  const log = (m, c) => { lines.push(c ? `<span class="${c}">${m}</span>` : m); logEl.innerHTML = lines.join('\n'); };
+  const assert = (cond, m) => { if (cond) log(`PASS  ${m}`, 'pass'); else { log(`FAIL  ${m}`, 'fail'); fail++; } };
+  const waitFor = (fn, t = 8000, iv = 50) => new Promise((res, rej) => { const s = performance.now();
+    const tick = () => { let v; try { v = fn(); } catch (e) {} if (v) return res(v);
+      if (performance.now() - s > t) return rej(new Error('timeout')); setTimeout(tick, iv); }; tick(); });
+  const iframe = document.getElementById('game-frame'), W = 390;
+  const setSwipe = (g, sn, h) => { const px = sn * W, vx = h * px; g.swipeInput.velocity.x = vx; g.swipeInput.velocity.y = -Math.sqrt(Math.max(0, px * px - vx * vx)); };
+  const clearSwipe = (g) => { g.swipeInput.velocity.x = 0; g.swipeInput.velocity.y = 0; };
+  const aim = (g, bs) => { const by = bs.position.y, bz = bs.position.z; let sy = (0.57*(by-0.78)+1.15*(bz-0.55))/1.6474; sy = Math.max(0, Math.min(1, sy)); g.swipeInput.position.x = Math.max(-1, Math.min(1, bs.position.x/0.75)); g.swipeInput.position.y = sy; };
+
+  // Seed an easy incoming ball on the player's side and swipe HARD through it.
+  function seedIncoming(g) {
+    g.setState('rally'); const b = g.physics.ball;
+    b.active = true; b.lastHitBy = 'opponent'; b.bounces = 1; b.lastBounceSide = 'player';
+    b.position.set(0, 1.0, 0.9); b.velocity.set(0, -0.4, 1.4); b.spin.set(0, 0, 0);
+    g.bouncePositions = [{ z: 0.6 }]; g.rallyShotCount = 0; g._lastEndReason = null; g.hitStop = 0; g.slowMo = 0;
+  }
+  function driveHardHitUntilContact(g, maxFrames = 200) {
+    for (let i = 0; i < maxFrames; i++) {
+      clearSwipe(g); const bs = g.physics.getBallState();
+      if (bs.velocity.z > 0 && bs.position.z > 0.3 && Math.abs(bs.position.x) < 0.9) { aim(g, bs); setSwipe(g, 8.0, 0); }
+      g.update(1 / 60);
+      if (g.physics.ball.lastHitBy === 'player') return true;
+    }
+    return false;
+  }
+
+  iframe.addEventListener('load', async () => {
+    try {
+      const idoc = iframe.contentDocument, iwin = iframe.contentWindow;
+      idoc.body.classList.add('touch-device');
+      const patch = idoc.createElement('script'); patch.type = 'module';
+      patch.textContent = `import('/js/core/Game.js').then(({Game})=>{const o=Game.prototype.startMatch;Game.prototype.startMatch=function(...a){window.__game=this;return o.apply(this,a);};window.__p=true;});`;
+      idoc.head.appendChild(patch);
+      await waitFor(() => iwin.__p); await waitFor(() => idoc.getElementById('btn-quick-match'));
+      idoc.getElementById('btn-quick-match').click();
+      const g = await waitFor(() => iwin.__game);
+      log('Game started. Verifying juice…\n', 'info');
+
+      // ---- Hit-stop: a hard swipe freezes the sim for ~3 frames ----
+      seedIncoming(g);
+      const contacted = driveHardHitUntilContact(g);
+      assert(contacted, 'hard swipe made contact');
+      assert(g.hitStop > 0, `hard hit set hit-stop (hitStop=${g.hitStop.toFixed(3)}s)`);
+      assert(g.sceneManager._fovKick < 0, `hard hit triggered FOV punch-in (fovKick=${g.sceneManager._fovKick.toFixed(2)})`);
+      assert(g.sceneManager._shake > 0, `hard hit triggered screen shake (shake=${g.sceneManager._shake.toFixed(3)})`);
+
+      // Frame-step: while hit-stop is active the ball must not move.
+      let frozenFrames = 0; const p0 = g.physics.ball.position.clone();
+      let prev = p0.clone();
+      for (let i = 0; i < 6; i++) {
+        const wasStopped = g.hitStop > 0;
+        g.update(1 / 60);
+        const moved = g.physics.ball.position.distanceTo(prev);
+        if (wasStopped) { if (moved < 1e-6) frozenFrames++; }
+        prev = g.physics.ball.position.clone();
+      }
+      assert(frozenFrames >= 2, `ball frozen for ≥2 frames during hit-stop (got ${frozenFrames})`);
+      // After hit-stop expires the ball moves again.
+      let movedAfter = false;
+      for (let i = 0; i < 10; i++) { const b = g.physics.ball.position.clone(); g.update(1/60); if (g.physics.ball.position.distanceTo(b) > 1e-4) { movedAfter = true; break; } }
+      assert(movedAfter, 'ball resumes moving after hit-stop');
+
+      // ---- Slow-mo: a hard hit at match point runs the sim at ~0.3x ----
+      g.score = { player: 10, opponent: 5 }; // match point (WINNING_SCORE=11)
+      seedIncoming(g);
+      driveHardHitUntilContact(g);
+      assert(g.slowMo > 0, `match-point smash set slow-mo (slowMo=${g.slowMo.toFixed(3)}s)`);
+      // Measure path length over N frames from an IDENTICAL airborne state
+      // (no bounce in the window), so the fixed-timestep accumulator averages
+      // out. Compare slow-mo vs normal.
+      const N = 12;
+      const seedAir = () => { const b = g.physics.ball; b.active = true; b.lastHitBy = 'player'; b.bounces = 0; b.lastBounceSide = null; b.position.set(0, 1.45, 0.2); b.velocity.set(0, 0, -6); b.spin.set(0, 0, 0); };
+      const pathOver = (frames) => { let path = 0, p = g.physics.ball.position.clone(); for (let i = 0; i < frames; i++) { g.update(1/60); const q = g.physics.ball.position; path += q.distanceTo(p); p = q.clone(); } return path; };
+      seedAir(); g.slowMo = 0.6; g.hitStop = 0; const slowPath = pathOver(N);
+      seedAir(); g.slowMo = 0; g.hitStop = 0; const normPath = pathOver(N);
+      log(`slow-mo path ${slowPath.toFixed(3)}m vs normal ${normPath.toFixed(3)}m over ${N} frames (ratio ${(slowPath/normPath).toFixed(2)})`, 'info');
+      assert(slowPath < normPath * 0.45, `sim advances ~0.3x under slow-mo (ratio ${(slowPath/normPath).toFixed(2)} < 0.45)`);
+
+      // ---- No exceptions over a longer scripted stretch with juice active ----
+      let threw = false;
+      try { for (let i = 0; i < 600; i++) { clearSwipe(g); const bs = g.physics.getBallState();
+        if (g.state === 'serving' && g.server === 'player' && !g.ballToss.active) setSwipe(g, 4, 0);
+        else if (g.state === 'rally' && bs.active && bs.lastHitBy !== 'player' && bs.velocity.z > 0 && bs.position.z > 0.3 && Math.abs(bs.position.x) < 0.9) { aim(g, bs); setSwipe(g, 3 + Math.random()*5, 0); }
+        g.update(1/60); if (g.state === 'point_end') { g.resetBall(); g.setState('serving'); }
+      } } catch (e) { threw = true; log('EXCEPTION: ' + (e.stack||e), 'fail'); }
+      assert(!threw, 'juice-active play runs 600 frames without throwing');
+
+      g.sceneManager.render();
+      log(`\n${fail === 0 ? 'ALL CHECKS PASSED' : fail + ' CHECK(S) FAILED'}`, fail === 0 ? 'pass' : 'fail');
+      window.__done = true; window.__fail = fail;
+    } catch (err) { log('HARNESS ERROR: ' + (err && err.stack || err), 'fail'); window.__done = true; window.__fail = -1; }
+  });
+</script>
+</body>
+</html>

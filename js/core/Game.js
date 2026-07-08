@@ -72,6 +72,13 @@ export class Game {
         
         // Paddle hit state
         this.playerHitProcessed = false;
+
+        // Juice: hit-stop freezes the sim for a few frames on hard contact;
+        // slow-mo plays the sim at 0.3x on smash winners / match point. Both
+        // count down in REAL time; gameplay advances on the scaled sim dt.
+        this.hitStop = 0;
+        this.slowMo = 0;
+        this._recentSmash = 0; // real-time window after a hard hit, for smash-winner slow-mo
         
         // Input callbacks
         this.input.on('keydown', (code) => this.handleKey(code));
@@ -114,7 +121,9 @@ export class Game {
         this.lastBounceSide = null;
         this.bouncePositions = [];
         this.rallyShotCount = 0;
-        
+        this.hitStop = 0;
+        this.slowMo = 0;
+
         if (this.server === 'player') {
             // Toss near the player's end of the table so the resting paddle (z ~ 1.70) can reach it.
             this.physics.ball.position.set(0, 1.3, 1.45);
@@ -159,12 +168,19 @@ export class Game {
             return;
         }
         
+        // ---- Juice time-scale: hit-stop freezes, slow-mo eases the sim. Timers
+        // count down in REAL time; the sim advances on the scaled `sdt`. ----
+        if (this.hitStop > 0) this.hitStop = Math.max(0, this.hitStop - dt);
+        if (this.slowMo > 0) this.slowMo = Math.max(0, this.slowMo - dt);
+        if (this._recentSmash > 0) this._recentSmash = Math.max(0, this._recentSmash - dt);
+        const sdt = this.hitStop > 0 ? 0 : dt * (this.slowMo > 0 ? 0.30 : 1);
+
         // Update input (clears click flags — justClicked is only used by
         // menu/pause now, handled via DOM buttons and keyboard events).
         this.input.update(dt);
 
-        // Update physics
-        const events = this.physics.update(dt);
+        // Update physics (scaled)
+        const events = this.physics.update(sdt);
         this.handlePhysicsEvents(events);
 
         const ballState = this.physics.getBallState();
@@ -175,36 +191,36 @@ export class Game {
         // ---- Swipe-to-hit: finger sweeps drive serves and rally returns ----
         this.handleSwipeInput(ballState, paddlePos, distToBall);
 
-        // Update opponent AI
-        this.opponent.update(dt, ballState, ballState.active, paddlePos.x);
-        
+        // Update opponent AI (scaled)
+        this.opponent.update(sdt, ballState, ballState.active, paddlePos.x);
+
         // Check opponent hit
         if (this.opponent.shouldHit(ballState) && ballState.lastHitBy !== 'opponent') {
             this.handleOpponentHit();
         }
-        
+
         // Auto-serve for AI
         if (this.state === GameState.SERVING && this.server === 'opponent') {
-            this.aiServeTimer = (this.aiServeTimer || 0) + dt;
+            this.aiServeTimer = (this.aiServeTimer || 0) + sdt;
             if (this.aiServeTimer > 1.5) {
                 this.aiServeTimer = 0;
                 this.performAIServe();
             }
         }
-        
+
         // ---- DEBUGGER: Log states ----
         this.debugger.logBallState(this.frameCount || 0, ballState);
         this.debugger.logPaddleState(this.frameCount || 0, paddlePos);
-        
+
         // Update debug UI
         this.updateDebugUI(ballState, paddlePos, distToBall, this.input);
-        
-        // Sync auto-tuned opponent difficulty, then update paddle.
+
+        // Sync auto-tuned opponent difficulty, then update paddle (scaled swing).
         this.opponent.setDifficulty(this.autoTune.get('opponentDifficulty'));
-        this.paddle.update(this.input, this.swipeInput, dt, ballState, canHitBall, this.autoTune);
-        
-        // Update effects
-        this.effects.update(dt);
+        this.paddle.update(this.input, this.swipeInput, sdt, ballState, canHitBall, this.autoTune);
+
+        // Update effects (scaled)
+        this.effects.update(sdt);
         
         // Update ball visual
         this.ballMesh.update(
@@ -435,6 +451,7 @@ Top Miss Reason: ${s.topMissReason}
         this.audio.playHit(hitIntensity);
         this.identifyShot(velocity, spin, 'player');
         this.rallyShotCount++;
+        this._haptic(12);
         // State stays SERVING; handleBounce promotes to RALLY once the serve
         // legally reaches the receiver's side (and faults it otherwise).
     }
@@ -460,8 +477,27 @@ Top Miss Reason: ${s.topMissReason}
         this.audio.playHit(hitIntensity);
         this.identifyShot(velocity, spin, 'player');
         this.rallyShotCount++;
-        // Camera punch-in on a hard (smash-tier) swipe.
-        if (shot.tier === 'hard') this.sceneManager.triggerImpact(1);
+        // Juice: hard swipes get hit-stop + punch-in + shake + a firmer buzz;
+        // every player contact gets a light haptic tap.
+        if (shot.tier === 'hard') {
+            this.hitStop = Math.max(this.hitStop, 0.045);   // ~3 frozen frames
+            this._recentSmash = 0.6;
+            this.sceneManager.triggerImpact(1);
+            this.sceneManager.triggerShake(0.06);
+            this._haptic(25);
+            if (this._isMatchPoint()) this.slowMo = 0.5;    // climactic slow-mo smash
+        } else {
+            this._haptic(12);
+        }
+    }
+
+    _isMatchPoint() {
+        return this.score.player >= WINNING_SCORE - 1 || this.score.opponent >= WINNING_SCORE - 1;
+    }
+
+    // Short haptic buzz; guarded for iOS Safari (no navigator.vibrate) and desktop.
+    _haptic(ms) {
+        try { if (navigator.vibrate) navigator.vibrate(ms); } catch (_) { /* ignore */ }
     }
 
     handleOpponentHit() {
@@ -481,8 +517,13 @@ Top Miss Reason: ${s.topMissReason}
         
         this.identifyShot(hitData.velocity, hitData.spin, 'opponent');
         this.rallyShotCount++;
-        // Camera punch-in on a fast opponent smash.
-        if (hitData.velocity.length() > 7.5) this.sceneManager.triggerImpact(0.8);
+        // Camera punch-in + shake on a fast opponent smash.
+        if (hitData.velocity.length() > 7.5) {
+            this.sceneManager.triggerImpact(0.8);
+            this.sceneManager.triggerShake(0.045);
+            this._recentSmash = 0.6;
+            if (this._isMatchPoint()) this.slowMo = 0.5;
+        }
     }
     
     performAIServe() {

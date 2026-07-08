@@ -208,8 +208,9 @@ export class UIManager {
     
     setupGameCallbacks() {
         this.game.onScoreChange = (p, o) => {
-            document.getElementById('score-player').textContent = p;
-            document.getElementById('score-opponent').textContent = o;
+            this._popScore('score-player', p, this._lastP);
+            this._popScore('score-opponent', o, this._lastO);
+            this._lastP = p; this._lastO = o;
         };
         
         this.game.onStateChange = (newState, oldState) => {
@@ -291,6 +292,18 @@ export class UIManager {
         this.showScreen('menu');
     }
     
+    _popScore(id, value, prev) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = value;
+        // Only pop when the number actually goes up (a point scored).
+        if (prev !== undefined && value > prev) {
+            el.classList.remove('score-pop');
+            void el.offsetWidth; // force reflow so the animation restarts
+            el.classList.add('score-pop');
+        }
+    }
+
     update(dt) {
         // The power/spin meters used to visualize auto-tuned shot knobs that no
         // longer exist (swipe + solver own shot shape now). Leave them inert

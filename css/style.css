@@ -529,6 +529,19 @@ kbd {
     color: #fff;
     min-width: 40px;
     text-align: center;
+    /* transform origin for the pop; layout unaffected */
+    display: inline-block;
+    will-change: transform, color;
+}
+
+/* Score pop: a quick punch-scale + color flash when the number changes. */
+.score.score-pop {
+    animation: score-pop 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+@keyframes score-pop {
+    0%   { transform: scale(1); color: #fff; }
+    30%  { transform: scale(1.6); color: #ff8a3d; }
+    100% { transform: scale(1); color: #fff; }
 }
 
 .score-divider {

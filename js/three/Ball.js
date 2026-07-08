@@ -167,7 +167,17 @@ export class BallMesh {
             }
         }
         this.trailMesh.geometry.attributes.position.needsUpdate = true;
-        
+
+        // Trail intensity scales with ball speed — faster shots streak brighter
+        // and thicker, slow pushes barely trail.
+        if (velocity) {
+            const speed = velocity.length();
+            const t = Math.max(0, Math.min(1, speed / 9));
+            this.trailMesh.material.opacity = 0.12 + t * 0.55;
+            this.trailMesh.material.size = 0.012 + t * 0.016;
+            this.glowLight.intensity = 0.5 + t * 0.9;
+        }
+
         // Update glow light
         if (this.glowLight) {
             this.glowLight.position.copy(position);

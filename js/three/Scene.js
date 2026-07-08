@@ -45,6 +45,7 @@ export class SceneManager {
         // = zoom in). Kept here so both the rig and the juice can drive it.
         this._fovKick = 0;
         this._curFov = 60;
+        this._shake = 0; // decaying screen-shake magnitude (metres)
         
         this.setupLighting();
         this.setupEnvironment();
@@ -186,6 +187,15 @@ export class SceneManager {
         this.camera.position.y += (targetCamY - this.camera.position.y) * 0.06;
         this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.06;
 
+        // Screen shake: decaying random offset applied on top of the smoothed
+        // position (juice on smashes). Applied before lookAt so the view jitters.
+        this._shake *= 0.82;
+        if (this._shake < 0.001) this._shake = 0;
+        if (this._shake > 0) {
+            this.camera.position.x += (Math.random() - 0.5) * this._shake;
+            this.camera.position.y += (Math.random() - 0.5) * this._shake;
+        }
+
         const lookTarget = new THREE.Vector3(ballX * 0.2, lookY, lookZ + ballZ * 0.1);
         this.camera.lookAt(lookTarget);
 
@@ -204,6 +214,11 @@ export class SceneManager {
     // Decaying zoom-in punch on impact (juice). strength ~1 = a firm smash.
     triggerImpact(strength = 1) {
         this._fovKick = Math.min(this._fovKick, -3.5 * strength);
+    }
+
+    // Decaying camera shake (metres of jitter) on impact.
+    triggerShake(magnitude = 0.05) {
+        this._shake = Math.max(this._shake, magnitude);
     }
 
     onResize() {
