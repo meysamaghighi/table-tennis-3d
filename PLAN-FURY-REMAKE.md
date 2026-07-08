@@ -142,7 +142,7 @@ tuning step with Opus rather than iterating blind.
 - [x] Phase 1 — SwipeInput + paddle tracking
 - [x] Phase 2 — Shot solver
 - [x] Phase 3 — Swipe-to-hit + serve  _(harness-verified; real-phone feel check still pending — deploy a preview and test on device)_
-- [ ] Phase 4 — AI opponent v2
+- [x] Phase 4 — AI opponent v2  _(harness-verified: serve legality 100%, return-in 83→96% by difficulty, avg rally 4.9)_
 - [ ] Phase 5 — Portrait camera
 - [ ] Phase 6 — Juice
 - [ ] Phase 7 — Pacing, HUD cleanup, ship

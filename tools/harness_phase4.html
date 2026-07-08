@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Phase 4 Harness — AI opponent v2</title>
+<style>
+  body { background:#111; color:#eee; font-family: monospace; padding: 16px; }
+  #frame-wrap { display:inline-block; border:2px solid #444; vertical-align: top; }
+  iframe { width:390px; height:720px; border:0; display:block; }
+  #log { white-space: pre-wrap; margin-top: 16px; max-width: 820px; display: inline-block; vertical-align: top; margin-left: 24px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ff5252; }
+  .info { color: #9cf; }
+</style>
+</head>
+<body>
+<h2>Phase 4 Harness — AI opponent v2 (serve legality, return-in, rally length)</h2>
+<div id="frame-wrap"><iframe id="game-frame" src="/index.html"></iframe></div>
+<div id="log">Loading…</div>
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+  import { simulateShot } from '/js/core/ShotSolver.js';
+  const HALF_WID = 1.525 / 2, HALF_LEN = 2.74 / 2;
+  // Judge an opponent shot purely from its launch state: where does it land if
+  // the player never touches it? IN = bounces in-bounds on the player's side.
+  function shotLandsIn(pos, vel, spin) {
+    const r = simulateShot({ x: pos.x, y: pos.y, z: pos.z }, { x: vel.x, y: vel.y, z: vel.z }, { x: spin.x, y: spin.y, z: spin.z });
+    return r.type === 'bounce' && r.position.z > 0 && Math.abs(r.position.x) <= HALF_WID && r.position.z <= HALF_LEN;
+  }
+  const logEl = document.getElementById('log');
+  const lines = [];
+  let failCount = 0;
+  const log = (m, c) => { lines.push(c ? `<span class="${c}">${m}</span>` : m); logEl.innerHTML = lines.join('\n'); console.log(m); };
+  const assert = (cond, m) => { if (cond) log(`PASS  ${m}`, 'pass'); else { log(`FAIL  ${m}`, 'fail'); failCount++; } };
+  function waitFor(fn, t = 8000, iv = 50) {
+    return new Promise((res, rej) => { const s = performance.now(); const tick = () => {
+      let v; try { v = fn(); } catch (e) {} if (v) return res(v);
+      if (performance.now() - s > t) return rej(new Error('waitFor timeout')); setTimeout(tick, iv); }; tick(); });
+  }
+
+  const iframe = document.getElementById('game-frame');
+  const W = 390;
+  const breathe = () => new Promise(r => setTimeout(r, 0)); // yield so the tab stays responsive
+
+  // ---- Scripted competent player (reused from the Phase 3 harness): serves by
+  // swipe-up, and returns by placing the finger so the paddle tracks to the ball
+  // (least-squares along the paddle's motion line) then swiping through it.
+  function clearSwipe(g) { g.swipeInput.velocity.x = 0; g.swipeInput.velocity.y = 0; g.swipeInput.pathCurvature = 0; }
+  function setSwipe(g, speedNorm, hFrac) {
+    const px = speedNorm * W, vx = hFrac * px;
+    g.swipeInput.velocity.x = vx;
+    g.swipeInput.velocity.y = -Math.sqrt(Math.max(0, px * px - vx * vx));
+  }
+  function aimPaddleAtBall(g, bs) {
+    const by = bs.position.y, bz = bs.position.z;
+    let sy = (0.57 * (by - 0.78) + 1.15 * (bz - 0.55)) / 1.6474;
+    sy = Math.max(0, Math.min(1, sy));
+    g.swipeInput.position.x = Math.max(-1, Math.min(1, bs.position.x / 0.75));
+    g.swipeInput.position.y = sy;
+  }
+  function scriptedPlayer(g) {
+    // A competent-but-not-perfect player: serves, and returns with CONTROLLED
+    // (soft/medium) swipes — hard swipes intentionally sail long (risk/reward),
+    // so a sensible player uses moderate power. This isolates the AI's behavior
+    // from the bot spraying its own shots out.
+    clearSwipe(g);
+    const bs = g.physics.getBallState();
+    if (g.state === 'serving' && g.server === 'player' && !g.ballToss.active) {
+      setSwipe(g, 4.0, (Math.random() - 0.5) * 0.3);
+    } else if (g.state === 'rally' && bs.active && bs.lastHitBy !== 'player' && bs.velocity.z > 0) {
+      aimPaddleAtBall(g, bs); // track the ball continuously so the paddle is ready
+      if (bs.position.z > 0.25 && Math.abs(bs.position.x) < 0.95) {
+        setSwipe(g, 3.0 + Math.random() * 0.9, (Math.random() - 0.5) * 0.3);
+      }
+    }
+  }
+  const pumpPointEnd = (g) => { if (g.state === 'point_end') { g.resetBall(); g.setState('serving'); g.debugger.startPoint(); } };
+
+  iframe.addEventListener('load', async () => {
+    try {
+      const idoc = iframe.contentDocument, iwin = iframe.contentWindow;
+      idoc.body.classList.add('touch-device');
+      const patch = idoc.createElement('script');
+      patch.type = 'module';
+      patch.textContent = `
+        import('/js/core/Game.js').then(({ Game }) => {
+          const orig = Game.prototype.startMatch;
+          Game.prototype.startMatch = function (...a) { window.__game = this; window.__points = [];
+            const sp = this.scorePoint.bind(this);
+            this.scorePoint = (w) => { window.__points.push({ winner: w, reason: this._lastEndReason, lastHitBy: this._lastHitByAtEnd, rallyShots: this.rallyShotCount }); return sp(w); };
+            return orig.apply(this, a); };
+          window.__gamePatched = true; });`;
+      idoc.head.appendChild(patch);
+      await waitFor(() => iwin.__gamePatched);
+      await waitFor(() => idoc.getElementById('btn-quick-match'));
+      idoc.getElementById('btn-quick-match').click();
+      const g = await waitFor(() => iwin.__game);
+      log('Game started. Running Phase 4 tests…\n', 'info');
+
+      // ===== TEST 1: AI serve legality (own bounce → receiver bounce) =====
+      let legalServes = 0, serveTrials = 0;
+      for (let n = 0; n < 60; n++) {
+        if (n % 4 === 0) await breathe();
+        g.setState('serving'); g.server = 'opponent';
+        g.serveBounceCount = 0; g.lastBounceSide = null; g.bouncePositions = []; g._lastEndReason = null;
+        const ptsB = iwin.__points.length;
+        g.performAIServe();
+        serveTrials++;
+        let legal = false;
+        for (let i = 0; i < 200; i++) {
+          g.update(1 / 60);
+          if (g.state === 'rally') { legal = true; break; }          // promoted on receiver-side bounce
+          if (iwin.__points.length > ptsB) break;                    // fault/net before reaching receiver
+        }
+        if (legal) legalServes++;
+        pumpPointEnd(g);
+      }
+      const serveRate = legalServes / serveTrials;
+      log(`AI serve legality: ${legalServes}/${serveTrials} (${(100 * serveRate).toFixed(0)}%)`, 'info');
+      assert(serveRate >= 0.99, `AI serves are legal ~100% (got ${(100 * serveRate).toFixed(0)}%)`);
+
+      // ===== TEST 2: AI return-in rate (direct, isolated, large sample) =====
+      // Call opponent.getHitData() on many constructed incoming contacts and
+      // judge each return purely by simulating its own launch trajectory. This
+      // isolates the AI's return quality (no player, no full rallies) and is
+      // fast enough for a big sample.
+      function returnInRate(difficulty, n) {
+        g.opponent.difficulty = difficulty;
+        let inN = 0;
+        for (let i = 0; i < n; i++) {
+          g.opponent.playerPaddleX = (Math.random() - 0.5) * 1.2; // player somewhere → open-court aim
+          const cz = -0.4 - Math.random() * 0.6;       // opponent-side contact
+          const cy = 0.82 + Math.random() * 0.4;
+          const cx = (Math.random() - 0.5) * 0.8;
+          const vec = (x, y, z) => ({ x, y, z, length() { return Math.hypot(x, y, z); } });
+          const ballState = {
+            position: { x: cx, y: cy, z: cz },
+            velocity: vec((Math.random() - 0.5) * 0.6, -0.5 + Math.random() * 1.5, -(2 + Math.random() * 3)),
+            spin: vec((Math.random() - 0.5) * 80, 0, (Math.random() - 0.5) * 30),
+          };
+          const hit = g.opponent.getHitData(ballState);
+          if (shotLandsIn(ballState.position, hit.velocity, hit.spin)) inN++;
+        }
+        return inN / n;
+      }
+
+      const inRates = {};
+      for (const d of [0.20, 0.45, 0.70]) {
+        await breathe();
+        inRates[d] = returnInRate(d, 150);
+        log(`diff ${d.toFixed(2)}: return-in ${(100 * inRates[d]).toFixed(0)}% (n=150)`, 'info');
+      }
+      const rLow = { inRate: inRates[0.20] }, rMid = { inRate: inRates[0.45] }, rHigh = { inRate: inRates[0.70] };
+
+      // ===== TEST 3: average rally length from one short match =====
+      async function measureMatch(difficulty, maxPoints, maxFrames) {
+        g.score = { player: 0, opponent: 0 }; g.server = 'player'; g.servesRemaining = 2;
+        iwin.__points.length = 0; g.resetBall(); g.setState('serving');
+        let oppHits = 0, oppReturnsIn = 0;
+        let prevHitBy = g.physics.ball.lastHitBy;
+        let frames = 0, lastPointFrame = 0, ptCount = 0;
+        const cappedRallies = []; // long rallies force-ended for time — still real exchanges
+        while (iwin.__points.length < maxPoints && frames < maxFrames) {
+          if (frames % 50 === 0) await breathe();
+          if (iwin.__points.length !== ptCount) { ptCount = iwin.__points.length; lastPointFrame = frames; }
+          // Cap a long-running point for time, but record its rally length as a
+          // sample (it's a genuine long exchange, not a stall).
+          if (frames - lastPointFrame > 260) { cappedRallies.push(g.rallyShotCount); g.resetBall(); g.setState('serving'); lastPointFrame = frames; ptCount = iwin.__points.length; }
+          g.autoTune.params.opponentDifficulty = difficulty; // pin difficulty
+          scriptedPlayer(g);
+          g.update(1 / 60);
+          const b = g.physics.ball;
+          // On each fresh opponent contact, judge the shot by its own launch
+          // trajectory (independent of what the player does next).
+          if (b.lastHitBy === 'opponent' && prevHitBy !== 'opponent') {
+            oppHits++;
+            if (shotLandsIn(b.position, b.velocity, b.spin)) oppReturnsIn++;
+          }
+          prevHitBy = b.lastHitBy;
+          pumpPointEnd(g);
+          frames++;
+        }
+        const pts = iwin.__points.slice();
+        const samples = pts.map(p => p.rallyShots || 0).concat(cappedRallies);
+        const avgRally = samples.reduce((s, v) => s + v, 0) / Math.max(1, samples.length);
+        return { oppHits, oppReturnsIn, inRate: oppHits ? oppReturnsIn / oppHits : 0, avgRally,
+                 points: pts.length, capped: cappedRallies.length, score: `${g.score.player}-${g.score.opponent}` };
+      }
+
+      // Return-in: an easy opponent errs enough to be beatable, a hard one is
+      // reliable, and it never drops with difficulty. (No tight upper ceiling —
+      // a strong AI legitimately rarely errs.)
+      assert(rLow.inRate >= 0.65 && rLow.inRate <= 0.90, `low-diff return-in 65–90% (beatable) (got ${(100 * rLow.inRate).toFixed(0)}%)`);
+      assert(rHigh.inRate >= 0.85, `high-diff return-in ≥ 85% (reliable) (got ${(100 * rHigh.inRate).toFixed(0)}%)`);
+      assert(rHigh.inRate >= rLow.inRate - 0.02,
+        `return-in rises with difficulty (${(100 * rLow.inRate).toFixed(0)}% → ${(100 * rMid.inRate).toFixed(0)}% → ${(100 * rHigh.inRate).toFixed(0)}%)`);
+
+      // Rally length: one short match at an easy-ish difficulty where the
+      // opponent keeps the ball reachable (rallies develop rather than instant winners).
+      const m = await measureMatch(0.42, 14, 2200);
+      log(`Rally match (diff 0.42): avgRally ${m.avgRally.toFixed(2)} over ${m.points + m.capped} rallies, score ${m.score}`, 'info');
+      assert(m.avgRally >= 4, `rallies average ≥ 4 shots (got ${m.avgRally.toFixed(2)})`);
+
+      g.sceneManager.render();
+      log(`\n${failCount === 0 ? 'ALL CHECKS PASSED' : failCount + ' CHECK(S) FAILED'}`, failCount === 0 ? 'pass' : 'fail');
+      window.__harnessDone = true; window.__harnessFailCount = failCount;
+    } catch (err) {
+      log('HARNESS ERROR: ' + (err && err.stack || err), 'fail');
+      window.__harnessDone = true; window.__harnessFailCount = -1;
+    }
+  });
+</script>
+</body>
+</html>

@@ -176,7 +176,7 @@ export class Game {
         this.handleSwipeInput(ballState, paddlePos, distToBall);
 
         // Update opponent AI
-        this.opponent.update(dt, ballState, ballState.active);
+        this.opponent.update(dt, ballState, ballState.active, paddlePos.x);
         
         // Check opponent hit
         if (this.opponent.shouldHit(ballState) && ballState.lastHitBy !== 'opponent') {
@@ -419,14 +419,14 @@ Top Miss Reason: ${s.topMissReason}
     processServeHit(ballState) {
         const serve = this._pendingServe || { aimX: 0, sideSpin: 0 };
         // Shaped serve profile: bounce own side, clear the net, land short on
-        // the opponent's side. Velocity range validated against the physics
-        // engine (legal for vy 1.2-1.6 / vz -2.4..-2.8 from contact y~1.05).
-        // Aim and sidespin come from the serve swipe; a light backspin baseline
-        // keeps the low trajectory from diving into the net.
-        const vy = 1.3 + Math.random() * 0.3;
-        const vz = -2.5 - Math.random() * 0.3;
+        // the opponent's side. Centered on the robustly-legal envelope (vy≈1.5,
+        // vz≈-2.8, spin.x≈0 — the z-mirror of the AI serve scan) so it clears
+        // the net reliably. Aim and (clamped) sidespin come from the swipe.
+        const vy = 1.5 + (Math.random() - 0.5) * 0.1;
+        const vz = -(2.8 + (Math.random() - 0.5) * 0.1);
         const velocity = new THREE.Vector3(serve.aimX * 0.8, vy, vz);
-        const spin = new THREE.Vector3(10 + Math.random() * 10, 0, serve.sideSpin);
+        const sideSpin = Math.max(-12, Math.min(12, serve.sideSpin));
+        const spin = new THREE.Vector3(2 + Math.random() * 6, 0, sideSpin);
 
         this.physics.ball.hit(velocity, spin, 'player');
 
@@ -464,12 +464,11 @@ Top Miss Reason: ${s.topMissReason}
 
     handleOpponentHit() {
         const ballState = this.physics.getBallState();
-        const hitData = this.opponent.getHitData();
-        
-        // Add some spin based on ball trajectory
-        const incomingSpin = ballState.spin.clone().multiplyScalar(0.3);
-        hitData.spin.add(incomingSpin);
-        
+        // Solver-driven return: the outgoing spin is chosen by the AI and the
+        // velocity was solved for exactly that spin, so we must NOT blend in the
+        // incoming spin here (it would invalidate the landing solution).
+        const hitData = this.opponent.getHitData(ballState);
+
         this.physics.ball.hit(hitData.velocity, hitData.spin, 'opponent');
         this.opponent.hasHitBall = true;
         
@@ -483,39 +482,26 @@ Top Miss Reason: ${s.topMissReason}
     }
     
     performAIServe() {
-        const serveTypes = ['topspin', 'backspin', 'sidespin'];
-        const type = serveTypes[Math.floor(Math.random() * serveTypes.length)];
-        
-        let velocity, spin;
-        
-        switch (type) {
-            case 'topspin':
-                velocity = new THREE.Vector3(
-                    (Math.random() - 0.5) * 1.0,
-                    1.5,
-                    3.0
-                );
-                spin = new THREE.Vector3(-30, 0, 0);
-                break;
-            case 'backspin':
-                velocity = new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.5,
-                    1.2,
-                    2.5
-                );
-                spin = new THREE.Vector3(20, 0, 0);
-                break;
-            case 'sidespin':
-                velocity = new THREE.Vector3(
-                    (Math.random() - 0.5) * 2.0,
-                    1.3,
-                    2.8
-                );
-                spin = new THREE.Vector3(-10, 0, 25);
-                break;
-        }
-        
-        this.physics.ball.position.set(0, 1.3, -0.8);
+        // Mirror of the player's validated serve profile (z-flipped): from a
+        // contact behind the opponent's baseline, a low forward drive that
+        // bounces the opponent's own side, clears the net, and lands short on
+        // the player's side. spin.x < 0 gives the +z-travelling ball the same
+        // net-clearing Magnus lift the player's backspin serve gets going -z.
+        // Serve legality (own bounce → receiver bounce) is checked in the
+        // Phase-4 harness. A small lateral aim places it across the player's box.
+        // Params centered on the robustly-legal serve envelope (vy≈1.5,
+        // vz≈2.8, spin.x≈0), scanned against the real physics — every neighbor
+        // in a ±0.1/±0.1/±5 box around it serves legally, so the tight jitter
+        // below stays inside the legal region (~100% serve legality).
+        const aimX = (Math.random() - 0.5) * 0.4;
+        const velocity = new THREE.Vector3(
+            aimX * 0.8,
+            1.5 + (Math.random() - 0.5) * 0.1,
+            2.8 + (Math.random() - 0.5) * 0.1
+        );
+        const spin = new THREE.Vector3(-(Math.random() * 6), 0, (Math.random() - 0.5) * 8);
+
+        this.physics.ball.position.set(0, 1.05, -1.45);
         this.physics.ball.serve(velocity);
         this.physics.ball.lastHitBy = 'opponent';
         this.physics.ball.spin.copy(spin);

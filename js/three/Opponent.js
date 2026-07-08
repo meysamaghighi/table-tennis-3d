@@ -4,6 +4,37 @@
  */
 
 import * as THREE from 'three';
+import { solveShot } from '../core/ShotSolver.js';
+import { TABLE_HEIGHT } from '../core/Physics.js';
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// Standard-normal sample (Box–Muller) for target scatter.
+function gaussian() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// Solve a landing shot, progressively raising the arc so a deep/heavy-spin ask
+// still finds a legal launch. Returns a velocity object, or null if even the
+// safe arcs can't reach the target (target likely off the table → an error).
+function solveWithBump(contact, targetLanding, arcHeight, spin) {
+    for (const arc of [arcHeight, arcHeight + 0.15, arcHeight + 0.35, 0.7]) {
+        const v = solveShot({ contact, targetLanding, arcHeight: arc, spin, tolerance: 0.07 });
+        if (v) return v;
+    }
+    return null;
+}
+
+// Power tier → landing depth on the player's court (+z), apex arc, and the
+// topspin(-)/backspin(+) the opponent imparts.
+const OPP_TIERS = {
+    smash: { z: 1.05, arc: 0.28, spinX: -35 },
+    drive: { z: 0.80, arc: 0.38, spinX: -22 },
+    push:  { z: 0.55, arc: 0.50, spinX: +18 },
+};
 
 export class Opponent {
     constructor(scene) {
@@ -66,11 +97,10 @@ export class Opponent {
         this.swingTimer = 0;
         this.hasHitBall = false;
         
-        // Shot selection
+        // Facing target (open-court x); actual shot is solved at contact time.
         this.targetX = 0;
-        this.shotPower = 0.7;
-        this.shotSpin = new THREE.Vector3();
-        
+        this.playerPaddleX = 0;
+
         // Reaction delay (based on difficulty)
         this.reactionTimer = 0;
         this.reactionDelay = 0.2;
@@ -80,7 +110,8 @@ export class Opponent {
         this.difficulty = Math.max(0, Math.min(1, level));
     }
     
-    update(dt, ballState, ballActive) {
+    update(dt, ballState, ballActive, playerPaddleX = 0) {
+        this.playerPaddleX = playerPaddleX;
         if (!ballActive) {
             // Return to ready position
             this.targetPosition.set(0, 1.0, -1.2);
@@ -146,9 +177,11 @@ export class Opponent {
             this.targetPosition.y = interceptY;
             this.targetPosition.z = interceptZ;
             
-            // Decide shot
-            this.planShot(ballState, predictedLanding);
-            
+            // Face toward the open court (away from the player's paddle). The
+            // actual shot velocity is solved at contact time in getHitData.
+            const openSide = (this.playerPaddleX || 0) >= 0 ? -1 : 1;
+            this.targetX = openSide * (0.15 + this.difficulty * 0.45);
+
             // Trigger swing timing
             const distToBall = position.distanceTo(this.position);
             const timeToReach = distToBall / Math.max(velocity.length(), 1.0);
@@ -184,43 +217,6 @@ export class Opponent {
         }
         
         return null;
-    }
-    
-    planShot(ballState, landing) {
-        // Decide where to hit the ball
-        const difficulty = this.difficulty;
-        
-        // Target: corners or center based on difficulty
-        const targets = [
-            { x: -0.5, z: 0.8 },  // wide to player left
-            { x: 0.5, z: 0.8 },   // wide to player right
-            { x: 0, z: 0.6 },     // deep center
-            { x: -0.3, z: 0.5 },  // short left
-            { x: 0.3, z: 0.5 },   // short right
-        ];
-        
-        // Higher difficulty = better target selection
-        const targetIndex = Math.floor(Math.random() * Math.max(1, targets.length * difficulty + 1));
-        const target = targets[Math.min(targetIndex, targets.length - 1)];
-        
-        this.targetX = target.x;
-        
-        // Calculate required velocity - slower shots for easier play
-        const dist = Math.sqrt(target.x * target.x + (target.z - landing.z) ** 2);
-        this.shotPower = 2.2 + difficulty * 2.0 + dist * 1.0;
-        
-        // Spin based on shot type
-        const shotType = Math.random();
-        if (shotType < 0.4) {
-            // Topspin
-            this.shotSpin.set(-10 - difficulty * 30, 0, 0);
-        } else if (shotType < 0.7) {
-            // Backspin
-            this.shotSpin.set(10 + difficulty * 20, 0, 0);
-        } else {
-            // Sidespin or no spin
-            this.shotSpin.set((Math.random() - 0.5) * 20, 0, (Math.random() - 0.5) * 15);
-        }
     }
     
     updateSwing(dt, ballState) {
@@ -276,24 +272,75 @@ export class Opponent {
         return dist < 0.25 && ballPos.z < 0.1 && ballPos.z > -1.2;
     }
     
-    getHitData() {
-        // Return velocity and spin for the hit
-        const angleX = this.targetX * 0.3;
-        // Vertical launch angle: hits come from ~0.9m (below net top), so the
-        // return needs real loft to clear. 0.65-0.9 lands on the player's side
-        // across typical contact points/speeds/spins (checked against the
-        // physics engine); the old 0.2-0.5 netted most returns.
-        const angleY = 0.65 + Math.random() * 0.25;
-        
-        const speed = this.shotPower * (0.7 + Math.random() * 0.3);
-        
+    /**
+     * Solver-driven return. Picks an open-court target away from the player's
+     * paddle, a power tier from the incoming ball height, and an error model
+     * (placement scatter + a miss chance) that both grow as difficulty drops
+     * and as the incoming shot gets faster/spinnier. The launch velocity is
+     * solved against the real physics so a clean return actually lands where
+     * aimed; a "miss" sabotages it into the net or long.
+     *
+     * @param {Object} ballState - live ball state at the moment of contact
+     */
+    getHitData(ballState) {
+        const diff = this.difficulty;
+        const contact = {
+            x: ballState.position.x,
+            y: ballState.position.y,
+            z: ballState.position.z,
+        };
+        const heightAbove = contact.y - TABLE_HEIGHT;
+        const incomingSpeed = ballState.velocity.length();
+        const spinMag = ballState.spin.length();
+        // Harder-to-handle incoming (fast / spinny) inflates the error terms.
+        const quality = clamp(0.5 + incomingSpeed / 12 + spinMag / 120, 0.5, 1.8);
+
+        let tierName = 'drive';
+        if (heightAbove > 0.30) tierName = 'smash';       // high ball → put it away
+        else if (heightAbove < 0.06) tierName = 'push';   // scraped low → safe push
+        const tier = OPP_TIERS[tierName];
+
+        // Open-court placement away from the player's paddle, plus scatter.
+        // Spread scales strongly with difficulty: an easy opponent hits near
+        // the middle (reachable → rallies develop), a hard one goes for the
+        // wide open corner (winners).
+        const openSide = (this.playerPaddleX || 0) >= 0 ? -1 : 1;
+        const spread = 0.15 + diff * 0.45;
+        const sigma = 0.18 * (1 - diff) * quality;
+        let targetX = openSide * spread + gaussian() * sigma;
+        let targetZ = tier.z + gaussian() * sigma * 0.7;
+        // Keep the intended target on the table so a clean return is legal;
+        // the miss model below is what puts balls out.
+        targetX = clamp(targetX, -0.62, 0.62);
+        targetZ = clamp(targetZ, 0.30, 1.25);
+
+        const spin = new THREE.Vector3(tier.spinX, 0, gaussian() * 8);
+
+        // Solve the intended (legal, on-table) shot first — this converges
+        // cheaply. Never hand the solver an off-table target: that would force
+        // its full non-converging fallback search on every miss (a big compute
+        // hitch). Errors are applied by sabotaging the solved velocity instead.
+        let vel = solveWithBump(contact, { x: targetX, z: targetZ }, tier.arc, spin);
+        if (!vel) {
+            const dx = targetX - contact.x, dz = targetZ - contact.z;
+            const h = Math.hypot(dx, dz) || 1;
+            vel = { x: (dx / h) * 5.5, y: 2.2, z: (dz / h) * 5.5 };
+        }
+
+        // Miss model: with a probability that grows as difficulty drops and the
+        // incoming ball gets nastier, the opponent commits a genuine, reliably
+        // fatal error — overhit long (flat + fast → sails past the baseline) or
+        // dump into the net (kill the loft). So return-in ≈ 1 - pMiss, keeping
+        // the game winnable at low difficulty.
+        const pMiss = Math.min(0.5, 0.30 * (1 - diff) * quality);
+        if (Math.random() < pMiss) {
+            if (Math.random() < 0.6) { vel = { x: vel.x, y: vel.y * 0.55, z: vel.z * 2.0 }; } // long/out
+            else { vel = { x: vel.x, y: vel.y * 0.12, z: vel.z * 0.7 }; }                     // into the net
+        }
+
         return {
-            velocity: new THREE.Vector3(
-                angleX * speed,
-                angleY * speed,
-                speed * 0.8
-            ),
-            spin: this.shotSpin.clone(),
+            velocity: new THREE.Vector3(vel.x, vel.y, vel.z),
+            spin,
         };
     }
     

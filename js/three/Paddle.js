@@ -295,14 +295,6 @@ export class PaddleMesh {
         return new THREE.Vector3(0, 0, -1).applyQuaternion(this.group.quaternion).normalize();
     }
     
-    getPaddleVelocity(autoTune) {
-        if (this.swingState === 'forward' || this.swingState === 'backswing') {
-            const thrust = (autoTune && autoTune.get('paddleThrust')) || 3.2;
-            return new THREE.Vector3(0, 0, -thrust);
-        }
-        return new THREE.Vector3(0, 0, 0);
-    }
-    
     dispose() {
         this.scene.remove(this.group);
         this.scene.remove(this.hitZoneMesh);

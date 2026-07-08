@@ -292,16 +292,8 @@ export class UIManager {
     }
     
     update(dt) {
-        // Meters now visualize the auto-tuned shot profile (so the player can
-        // see the AutoTune system reacting to their results in real time).
-        const t = this.game.autoTune;
-        if (!t) return;
-        const thrust = t.get('paddleThrust');   // 2.2 .. 5.0
-        const arc    = t.get('shotArc');        // 0.30 .. 0.90
-        const power  = ((thrust - 2.2) / (5.0 - 2.2)) * 100;
-        const spin   = ((arc    - 0.30) / (0.90 - 0.30)) * 100;
-
-        document.getElementById('power-fill').style.width = `${Math.max(0, Math.min(100, power))}%`;
-        document.getElementById('spin-fill').style.width  = `${Math.max(0, Math.min(100, spin))}%`;
+        // The power/spin meters used to visualize auto-tuned shot knobs that no
+        // longer exist (swipe + solver own shot shape now). Leave them inert
+        // here; the dead meter DOM is removed in Phase 7.
     }
 }
