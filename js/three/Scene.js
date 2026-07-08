@@ -28,16 +28,23 @@ export class SceneManager {
         this.scene.background = new THREE.Color(0x1a1a2e);
         this.scene.fog = new THREE.Fog(0x1a1a2e, 8, 20);
         
-        // Third-person broadcast camera - positioned to see full table
+        // Third-person camera. Two rigs, chosen by aspect ratio each frame:
+        //  - PORTRAIT (phone): lower + closer, wider FOV, table fills the narrow
+        //    frame width; a Fury-like behind-the-player view.
+        //  - LANDSCAPE (desktop/tablet wide): the original broadcast framing.
         this.camera = new THREE.PerspectiveCamera(
-            50, 
-            window.innerWidth / window.innerHeight, 
-            0.01, 
+            60,
+            window.innerWidth / window.innerHeight,
+            0.01,
             50
         );
-        // Positioned behind player, elevated, looking down the table
-        this.camera.position.set(0, 2.8, 3.6);
-        this.camera.lookAt(0, 0.5, 0);
+        this.camera.position.set(0, 2.05, 2.65);
+        this.camera.lookAt(0, 0.5, -0.3);
+
+        // Decaying FOV "punch-in" on hard hits (added to the base FOV; negative
+        // = zoom in). Kept here so both the rig and the juice can drive it.
+        this._fovKick = 0;
+        this._curFov = 60;
         
         this.setupLighting();
         this.setupEnvironment();
@@ -148,28 +155,57 @@ export class SceneManager {
     }
     
     updateCameraPosition(playerOffset, paddlePosition, ballPosition) {
-        // Smooth third-person broadcast camera
-        const targetCamX = playerOffset.x * 0.3;
-        const targetCamY = 2.7 + Math.abs(playerOffset.z) * 0.1;
-        const targetCamZ = 3.5 + playerOffset.z * 0.2;
-        
+        const aspect = this.camera.aspect || (window.innerWidth / window.innerHeight);
+        const portrait = aspect < 1.0;
+
+        const ballX = (ballPosition && ballPosition.lengthSq() > 0) ? ballPosition.x : 0;
+        const ballZ = (ballPosition && ballPosition.lengthSq() > 0) ? ballPosition.z : 0;
+
+        let targetCamX, targetCamY, targetCamZ, lookY, lookZ, baseFov, lean;
+        if (portrait) {
+            // Lower, closer, wider — the table fills the phone's frame width.
+            baseFov = 62;
+            targetCamY = 2.05 + Math.abs(playerOffset.z) * 0.1;
+            targetCamZ = 2.65 + playerOffset.z * 0.2;
+            lookY = 0.52;
+            lookZ = -0.35;
+            lean = 0.15;            // subtle lateral lean following the ball
+        } else {
+            // Original broadcast framing (desktop / wide tablet).
+            baseFov = 50;
+            targetCamY = 2.7 + Math.abs(playerOffset.z) * 0.1;
+            targetCamZ = 3.5 + playerOffset.z * 0.2;
+            lookY = 0.6;
+            lookZ = 0;
+            lean = 0.10;
+        }
+        // Lateral lean = player offset plus a clamped follow of the ball's X.
+        targetCamX = playerOffset.x * 0.3 + Math.max(-lean, Math.min(lean, ballX * 0.3));
+
         this.camera.position.x += (targetCamX - this.camera.position.x) * 0.06;
         this.camera.position.y += (targetCamY - this.camera.position.y) * 0.06;
         this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.06;
-        
-        // Look at table center, with slight tracking toward ball
-        let lookX = 0;
-        let lookZ = 0;
-        
-        if (ballPosition && ballPosition.lengthSq() > 0) {
-            lookX = ballPosition.x * 0.2;
-            lookZ = ballPosition.z * 0.1;
-        }
-        
-        const lookTarget = new THREE.Vector3(lookX, 0.6, lookZ);
+
+        const lookTarget = new THREE.Vector3(ballX * 0.2, lookY, lookZ + ballZ * 0.1);
         this.camera.lookAt(lookTarget);
+
+        // FOV: base + decaying punch-in. Only touch the projection matrix when
+        // it actually changes (updateProjectionMatrix isn't free).
+        this._fovKick *= 0.86;
+        if (Math.abs(this._fovKick) < 0.05) this._fovKick = 0;
+        const fov = baseFov + this._fovKick;
+        if (Math.abs(fov - this._curFov) > 0.01) {
+            this.camera.fov = fov;
+            this.camera.updateProjectionMatrix();
+            this._curFov = fov;
+        }
     }
-    
+
+    // Decaying zoom-in punch on impact (juice). strength ~1 = a firm smash.
+    triggerImpact(strength = 1) {
+        this._fovKick = Math.min(this._fovKick, -3.5 * strength);
+    }
+
     onResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();

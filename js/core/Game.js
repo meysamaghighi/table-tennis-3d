@@ -460,6 +460,8 @@ Top Miss Reason: ${s.topMissReason}
         this.audio.playHit(hitIntensity);
         this.identifyShot(velocity, spin, 'player');
         this.rallyShotCount++;
+        // Camera punch-in on a hard (smash-tier) swipe.
+        if (shot.tier === 'hard') this.sceneManager.triggerImpact(1);
     }
 
     handleOpponentHit() {
@@ -479,6 +481,8 @@ Top Miss Reason: ${s.topMissReason}
         
         this.identifyShot(hitData.velocity, hitData.spin, 'opponent');
         this.rallyShotCount++;
+        // Camera punch-in on a fast opponent smash.
+        if (hitData.velocity.length() > 7.5) this.sceneManager.triggerImpact(0.8);
     }
     
     performAIServe() {
