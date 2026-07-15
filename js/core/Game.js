@@ -588,6 +588,17 @@ Top Miss Reason: ${s.topMissReason}
     }
     
     scorePoint(winner) {
+        // Guard against double-counting a single dead ball. Several physics
+        // events (floor bounce, double bounce, serve fault) can fire within the
+        // same frame and each calls scorePoint; without this guard the score
+        // increments twice, skipping the legal 11-point / deuce game-over check
+        // and producing impossible finals like 10-13. Only active play
+        // (SERVING / RALLY) may score; once we're in POINT_END or GAME_OVER the
+        // point is already decided.
+        if (this.state === GameState.POINT_END || this.state === GameState.GAME_OVER) {
+            return;
+        }
+
         // Deactivate ball immediately
         this.physics.ball.active = false;
         this.ballMesh.setVisible(false);

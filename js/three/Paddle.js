@@ -13,22 +13,14 @@ export class PaddleMesh {
         const handleH = 0.09;
         const handleThickness = 0.028;
         
-        // --- Rounded blade using Shape + ExtrudeGeometry ---
-        const bladeW = 0.075;
-        const bladeH = 0.08;
-        const cornerR = 0.025;
-        
+        // --- Round blade (circular, like a real table-tennis paddle) ---
+        const bladeR = 0.078;
+        // Blade centre sits above the handle so the two overlap at the throat.
+        const bladeCenterY = handleH / 2 + bladeR * 0.55;
+
         const bladeShape = new THREE.Shape();
-        bladeShape.moveTo(0, -bladeH + cornerR);
-        bladeShape.quadraticCurveTo(-bladeW, -bladeH, -bladeW + cornerR, -bladeH);
-        bladeShape.lineTo(bladeW - cornerR, -bladeH);
-        bladeShape.quadraticCurveTo(bladeW, -bladeH, bladeW, -bladeH + cornerR);
-        bladeShape.lineTo(bladeW, bladeH - cornerR);
-        bladeShape.quadraticCurveTo(bladeW, bladeH, bladeW - cornerR, bladeH);
-        bladeShape.lineTo(-bladeW + cornerR, bladeH);
-        bladeShape.quadraticCurveTo(-bladeW, bladeH, -bladeW, bladeH - cornerR);
-        bladeShape.lineTo(-bladeW, -bladeH + cornerR);
-        
+        bladeShape.absarc(0, 0, bladeR, 0, Math.PI * 2, false);
+
         const bladeThickness = 0.006;
         const extrudeSettings = {
             depth: bladeThickness,
@@ -39,7 +31,7 @@ export class PaddleMesh {
         };
         
         const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, extrudeSettings);
-        bladeGeo.translate(0, handleH / 2 + bladeH * 0.3, -bladeThickness / 2);
+        bladeGeo.translate(0, bladeCenterY, -bladeThickness / 2);
         
         const bladeMat = new THREE.MeshStandardMaterial({
             color: 0x8B4513,
@@ -75,7 +67,7 @@ export class PaddleMesh {
             depth: rubberThick,
             bevelEnabled: false,
         });
-        rubberGeo.translate(0, handleH / 2 + bladeH * 0.3, -(bladeThickness + rubberThick));
+        rubberGeo.translate(0, bladeCenterY, -(bladeThickness + rubberThick));
         
         this.rubberMat = new THREE.MeshStandardMaterial({
             color: 0xb71c1c,
@@ -90,42 +82,22 @@ export class PaddleMesh {
             depth: rubberThick,
             bevelEnabled: false,
         });
-        rubberBackGeo.translate(0, handleH / 2 + bladeH * 0.3, bladeThickness);
+        rubberBackGeo.translate(0, bladeCenterY, bladeThickness);
         this.rubberBack = new THREE.Mesh(rubberBackGeo, this.rubberMat.clone());
         this.group.add(this.rubberBack);
         
-        // Edge tape
+        // Edge tape (circular ring around the blade)
         const tapeShape = new THREE.Shape();
-        const tw = bladeW + 0.003;
-        const th = bladeH + 0.003;
-        const tr = cornerR + 0.003;
-        tapeShape.moveTo(0, -th + tr);
-        tapeShape.quadraticCurveTo(-tw, -th, -tw + tr, -th);
-        tapeShape.lineTo(tw - tr, -th);
-        tapeShape.quadraticCurveTo(tw, -th, tw, -th + tr);
-        tapeShape.lineTo(tw, th - tr);
-        tapeShape.quadraticCurveTo(tw, th, tw - tr, th);
-        tapeShape.lineTo(-tw + tr, th);
-        tapeShape.quadraticCurveTo(-tw, th, -tw, th - tr);
-        tapeShape.lineTo(-tw, -th + tr);
-        
+        tapeShape.absarc(0, 0, bladeR + 0.003, 0, Math.PI * 2, false);
         const holeShape = new THREE.Path();
-        holeShape.moveTo(0, -bladeH + cornerR);
-        holeShape.quadraticCurveTo(-bladeW, -bladeH, -bladeW + cornerR, -bladeH);
-        holeShape.lineTo(bladeW - cornerR, -bladeH);
-        holeShape.quadraticCurveTo(bladeW, -bladeH, bladeW, -bladeH + cornerR);
-        holeShape.lineTo(bladeW, bladeH - cornerR);
-        holeShape.quadraticCurveTo(bladeW, bladeH, bladeW - cornerR, bladeH);
-        holeShape.lineTo(-bladeW + cornerR, bladeH);
-        holeShape.quadraticCurveTo(-bladeW, bladeH, -bladeW, bladeH - cornerR);
-        holeShape.lineTo(-bladeW, -bladeH + cornerR);
+        holeShape.absarc(0, 0, bladeR, 0, Math.PI * 2, true);
         tapeShape.holes.push(holeShape);
         
         const tapeGeo = new THREE.ExtrudeGeometry(tapeShape, {
             depth: bladeThickness + rubberThick * 2 + 0.002,
             bevelEnabled: false,
         });
-        tapeGeo.translate(0, handleH / 2 + bladeH * 0.3, -(bladeThickness / 2 + rubberThick + 0.001));
+        tapeGeo.translate(0, bladeCenterY, -(bladeThickness / 2 + rubberThick + 0.001));
         const tapeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
         this.group.add(new THREE.Mesh(tapeGeo, tapeMat));
         

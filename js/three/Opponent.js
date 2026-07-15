@@ -41,21 +41,23 @@ export class Opponent {
         this.scene = scene;
         this.group = new THREE.Group();
         
-        // Similar paddle geometry but simplified (no need for full detail on far side)
-        const bladeW = 0.15;
-        const bladeH = 0.16;
+        // Round blade (circular disc, like a real paddle); simplified vs. the
+        // player's — a far-side cylinder is plenty of detail.
+        const bladeR = 0.08;
         const bladeThickness = 0.006;
         const handleH = 0.09;
-        
-        // Blade
+        const bladeCenterY = handleH / 2 + bladeR - 0.01;
+
+        // Blade (cylinder rotated so its round faces point along Z, toward the net)
         const blade = new THREE.Mesh(
-            new THREE.BoxGeometry(bladeW, bladeH, bladeThickness),
+            new THREE.CylinderGeometry(bladeR, bladeR, bladeThickness, 40),
             new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.6 })
         );
-        blade.position.y = handleH / 2 + bladeH / 2 - 0.01;
+        blade.rotation.x = Math.PI / 2;
+        blade.position.y = bladeCenterY;
         blade.castShadow = true;
         this.group.add(blade);
-        
+
         // Handle
         const handle = new THREE.Mesh(
             new THREE.BoxGeometry(0.035, handleH, 0.028),
@@ -64,22 +66,24 @@ export class Opponent {
         handle.position.y = -0.02;
         handle.castShadow = true;
         this.group.add(handle);
-        
+
         // Rubber
         const rubberThick = 0.003;
         const rubber = new THREE.Mesh(
-            new THREE.BoxGeometry(bladeW - 0.002, bladeH - 0.002, rubberThick),
+            new THREE.CylinderGeometry(bladeR - 0.002, bladeR - 0.002, rubberThick, 40),
             new THREE.MeshStandardMaterial({ color: 0x1565c0, roughness: 0.5 })
         );
-        rubber.position.set(0, handleH / 2 + bladeH / 2 - 0.01, bladeThickness / 2 + rubberThick / 2);
+        rubber.rotation.x = Math.PI / 2;
+        rubber.position.set(0, bladeCenterY, bladeThickness / 2 + rubberThick / 2);
         this.group.add(rubber);
-        
+
         // Rubber back
         const rubberBack = new THREE.Mesh(
-            new THREE.BoxGeometry(bladeW - 0.002, bladeH - 0.002, rubberThick),
+            new THREE.CylinderGeometry(bladeR - 0.002, bladeR - 0.002, rubberThick, 40),
             new THREE.MeshStandardMaterial({ color: 0x1565c0, roughness: 0.5 })
         );
-        rubberBack.position.set(0, handleH / 2 + bladeH / 2 - 0.01, -bladeThickness / 2 - rubberThick / 2);
+        rubberBack.rotation.x = Math.PI / 2;
+        rubberBack.position.set(0, bladeCenterY, -bladeThickness / 2 - rubberThick / 2);
         this.group.add(rubberBack);
         
         this.scene.add(this.group);
