@@ -27,7 +27,16 @@ class App {
             if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
                 document.body.classList.add('touch-device');
             }
-            
+
+            // Debug overlays are dev-only — hide unless explicitly requested.
+            const DEBUG = new URLSearchParams(location.search).has('debug');
+            if (!DEBUG) {
+                ['debug-info', 'debug-diagnosis', 'debug-summary'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+            }
+
             // Core systems
             this.input = new InputManager();
             this.swipeInput = new SwipeInput(this.canvas);
@@ -72,14 +81,9 @@ class App {
     }
     
     setupMobileControls() {
-        // Auto-swing means there's nothing to "swing" manually anymore — hide
-        // the SWING button on phone/tablet. Click-prompt is also gone.
-        const swingBtn = document.getElementById('btn-mobile-swing');
-        if (swingBtn) swingBtn.style.display = 'none';
-        const clickPrompt = document.getElementById('click-prompt');
-        if (clickPrompt) clickPrompt.style.display = 'none';
-
         // Serving is a swipe-up now (SwipeInput → Game.handleSwipeInput); no TOSS button.
+        // Paddle angle is auto-determined from ball/swing state; no manual control.
+        // Only the pause button remains.
         const pauseBtn = document.getElementById('btn-mobile-pause');
 
         if (pauseBtn) {
@@ -96,10 +100,6 @@ class App {
                 }
             });
         }
-        
-        // Paddle angle is now auto-determined from ball/swing state; no manual control.
-        const angleControls = document.querySelector('.mobile-angle-controls');
-        if (angleControls) angleControls.style.display = 'none';
     }
     
     setupPointerLock() {

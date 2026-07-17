@@ -174,6 +174,8 @@ export class InputManager {
     }
     
     dispose() {
+        const canvas = document.getElementById('game-canvas');
+
         window.removeEventListener('mousemove', this._boundHandlers.mousemove);
         window.removeEventListener('mousedown', this._boundHandlers.mousedown);
         window.removeEventListener('mouseup', this._boundHandlers.mouseup);

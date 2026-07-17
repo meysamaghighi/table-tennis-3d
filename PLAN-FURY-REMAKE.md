@@ -145,4 +145,15 @@ tuning step with Opus rather than iterating blind.
 - [x] Phase 4 — AI opponent v2  _(harness-verified: serve legality 100%, return-in 83→96% by difficulty, avg rally 4.9)_
 - [x] Phase 5 — Portrait camera  _(aspect-based portrait/landscape rigs; verified at 390×720, 390×844, 768×1024, 1470×746)_
 - [x] Phase 6 — Juice  _(hit-stop/slow-mo/shake/FOV-kick frame-step verified; trail+audio+score-pop+haptics for device review)_
-- [ ] Phase 7 — Pacing, HUD cleanup, ship
+- [x] Phase 7 — Pacing, HUD cleanup, ship  _(done 2026-07-17 in playmini `public/michael/table-tennis`: point-reset 1500→700ms; kept 11-point matches per Meysam; removed power/spin meters + crosshair + click-prompt + mobile SWING/angle buttons (kept pause); debug gated behind `?debug=1`; fixed `Input.dispose()` `canvas` ReferenceError; rewrote How-to-Play for swipe controls. Playtested desktop+phone+tablet, 0 console errors.)_
+
+## Post-remake additions (2026-07-17, Meysam)
+- **Blue table:** competition ITTF blue (`Table.js` surface `0x1a3a5c`→`0x1d5fb0`).
+- **Serve direction + depth from the swipe, distinct swing:** swipe ANGLE →
+  left/center/right (`aimX = hDir`), swipe POWER (finger speed) → short/long
+  depth (`depthT`). Serve envelope in `Game.js` `SERVE` was **validated against
+  the real PhysicsEngine** (grid sweep depthT×aim×jitter×spin, ~98% legal): short
+  = gentle high drop just past the net (lands z≈-0.22); long = fast flat downward
+  drive to mid-court (z≈-0.5). Paddle swing scales with power (compact↔big) and
+  leans for L/R aim. NOTE: a legal two-bounce serve from this contact geometry
+  can't reach the end line — "long" tops out at mid-court by physics.

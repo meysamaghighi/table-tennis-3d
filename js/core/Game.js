@@ -20,6 +20,24 @@ const SERVE_CHANGE_INTERVAL = 2;
 // and the finger is sweeping through it faster than SWIPE_HIT_THRESHOLD.
 const HIT_REACH = 0.45;
 
+// Serve envelope — validated against the real PhysicsEngine (grid sweep of
+// depthT × aim × jitter × spin: ~98% land legally; the rest are extreme
+// wide/heavy-spin serves that fairly fault). Serve must bounce own side,
+// clear the net, then land in the receiver's court. A legal two-bounce serve
+// from this contact geometry can only reach ~mid-court, so short↔long is a
+// relative range: soft flick = gentle high DROP just past the net (lands z≈
+// -0.22); fast swipe = flat downward DRIVE to mid-court (lands z≈-0.5, and
+// noticeably faster). depthT (0=short..1=long) lerps vy/vz between these.
+const SERVE = {
+    VZ_SHORT: -2.4,   // depthT=0: gentle, drops short just over the net
+    VZ_LONG:  -4.6,   // depthT=1: fast, drives to mid-court
+    VY_SHORT:  1.5,   // high arc for the short drop serve
+    VY_LONG:  -0.5,   // downward flat drive for the long serve
+    VX_MAX:    1.1,   // lateral velocity at full left/right aim
+};
+
+const lerp = (a, b, t) => a + (b - a) * t;
+
 export const GameState = {
     MENU: 'menu',
     SERVING: 'serving',
@@ -45,6 +63,7 @@ export class Game {
         this.debugger = new GameDebugger();
         this.autoTune = new AutoTune();
         this._lastEndReason = null;
+        this.debug = new URLSearchParams(location.search).has('debug');
         
         this.state = GameState.MENU;
         this.score = { player: 0, opponent: 0 };
@@ -245,6 +264,8 @@ export class Game {
     }
     
     updateDebugUI(ballState, paddlePos, distToBall, input) {
+        if (!this.debug) return;
+
         // Real-time status
         const status = this.debugger.getRealTimeStatus(ballState, paddlePos, this.paddle.swingState, distToBall);
         const debugInfo = document.getElementById('debug-info');
@@ -406,8 +427,11 @@ Top Miss Reason: ${s.topMissReason}
         // ---- Serve: an upward swipe tosses the ball and arms the strike. ----
         if (this.state === GameState.SERVING && this.server === 'player' && !this.ballToss.active) {
             if (swiping && m.vDir > 0.2) {
+                // Swipe ANGLE → left/right aim; swipe POWER (finger speed) → short/long depth.
+                const depthT = Math.max(0, Math.min(1, (m.speedNorm - 1.5) / (5.0 - 1.5)));
                 this.tossBall({
-                    aimX: m.hDir * 0.25,
+                    aimX: m.hDir,
+                    depthT,
                     sideSpin: Math.max(-25, Math.min(25, m.dirSign * m.curvature * 120)),
                 });
             }
@@ -417,7 +441,10 @@ Top Miss Reason: ${s.topMissReason}
         if (this.state === GameState.SERVING && this.server === 'player'
             && this.ballToss.active && ballState.lastHitBy === null
             && ballState.velocity.y < 0 && ballState.position.y < 1.15) {
-            this.paddle.triggerSwing();
+            this.paddle.triggerSwing({
+                power: this._pendingServe?.depthT ?? 0.5,
+                dir: this._pendingServe?.aimX ?? 0,
+            });
             this.processServeHit(ballState);
             return;
         }
@@ -433,14 +460,15 @@ Top Miss Reason: ${s.topMissReason}
     }
 
     processServeHit(ballState) {
-        const serve = this._pendingServe || { aimX: 0, sideSpin: 0 };
-        // Shaped serve profile: bounce own side, clear the net, land short on
-        // the opponent's side. Centered on the robustly-legal envelope (vy≈1.5,
-        // vz≈-2.8, spin.x≈0 — the z-mirror of the AI serve scan) so it clears
-        // the net reliably. Aim and (clamped) sidespin come from the swipe.
-        const vy = 1.5 + (Math.random() - 0.5) * 0.1;
-        const vz = -(2.8 + (Math.random() - 0.5) * 0.1);
-        const velocity = new THREE.Vector3(serve.aimX * 0.8, vy, vz);
+        const serve = this._pendingServe || { aimX: 0, depthT: 0, sideSpin: 0 };
+        // Shaped serve profile: bounce own side, clear the net, land in the
+        // receiver's court. Depth (short↔long) and lateral aim (left↔right)
+        // come from the swipe via the tunable SERVE envelope above; sidespin
+        // is the (clamped) curvature-derived value from the swipe.
+        const dT = serve.depthT ?? 0;
+        const vy = lerp(SERVE.VY_SHORT, SERVE.VY_LONG, dT) + (Math.random() - 0.5) * 0.1;
+        const vz = lerp(SERVE.VZ_SHORT, SERVE.VZ_LONG, dT) + (Math.random() - 0.5) * 0.1;
+        const velocity = new THREE.Vector3(serve.aimX * SERVE.VX_MAX, vy, vz);
         const sideSpin = Math.max(-12, Math.min(12, serve.sideSpin));
         const spin = new THREE.Vector3(2 + Math.random() * 6, 0, sideSpin);
 
@@ -656,7 +684,7 @@ Top Miss Reason: ${s.topMissReason}
                 this.setState(GameState.SERVING);
                 this.debugger.startPoint();
             }
-        }, 1500);
+        }, 700);
     }
     
     endPoint(reason) {

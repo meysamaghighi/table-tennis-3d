@@ -18,10 +18,10 @@ export class TableManager {
     createTable() {
         const group = new THREE.Group();
         
-        // Table surface - dark blue typical competition color
+        // Table surface - ITTF competition blue
         const surfaceGeo = new THREE.BoxGeometry(TABLE_WIDTH, 0.025, TABLE_LENGTH);
         const surfaceMat = new THREE.MeshStandardMaterial({
-            color: 0x1a3a5c,
+            color: 0x1d5fb0,
             roughness: 0.35,
             metalness: 0.05,
         });

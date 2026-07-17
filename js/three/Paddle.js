@@ -5,6 +5,8 @@
 import * as THREE from 'three';
 import { TABLE_HEIGHT, TABLE_LENGTH } from '../core/Physics.js';
 
+const lerp = (a, b, t) => a + (b - a) * t;
+
 export class PaddleMesh {
     constructor(scene) {
         this.scene = scene;
@@ -117,6 +119,11 @@ export class PaddleMesh {
         // (TABLE_LENGTH/2 = 1.37) so it never clips through the table surface.
         this.basePosition = new THREE.Vector3(0, 1.0, 1.70);
         this.hasHitThisSwing = false;
+
+        // Per-swing shape: amp scales swing size (compact short serve ↔ big
+        // long serve), lean adds a lateral yaw for left/right serve aim.
+        // Default {amp:1, lean:0} keeps rally swings identical to before.
+        this.swingVariant = { amp: 1, lean: 0 };
         
         // Hit zone indicator
         this.hitZoneMesh = new THREE.Mesh(
@@ -217,13 +224,19 @@ export class PaddleMesh {
                 break;
             }
         }
+        swingRotX *= this.swingVariant.amp;
+        swingOffsetZ *= this.swingVariant.amp;
+
+        // Lateral lean (serve aim) applies only while a swing is active.
+        const swingActive = this.swingState === 'backswing' || this.swingState === 'forward' || this.swingState === 'follow';
+        const yawLean = swingActive ? this.swingVariant.lean : 0;
 
         // Apply
         this.group.position.copy(this.basePosition);
         this.group.position.z += swingOffsetZ;
         this.group.rotation.set(
             swingRotX + this._smPitch,
-            this._smYaw,
+            this._smYaw + yawLean,
             0
         );
 
@@ -240,11 +253,17 @@ export class PaddleMesh {
         }
     }
     
-    triggerSwing() {
+    triggerSwing(opts) {
         if (this.swingState === 'ready') {
             this.swingState = 'backswing';
             this.swingTimer = 0;
             this.hasHitThisSwing = false;
+            // Serve strikes pass opts (power/dir from the swipe) to shape the
+            // swing; rally hits call with no args and get the identical,
+            // unchanged rally swing (amp:1, lean:0).
+            this.swingVariant = opts
+                ? { amp: lerp(0.7, 1.3, opts.power ?? 0.5), lean: (opts.dir ?? 0) * 0.28 }
+                : { amp: 1, lean: 0 };
         }
     }
     
